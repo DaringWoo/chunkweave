@@ -8,7 +8,7 @@ from typing import ClassVar
 
 from ..chunk import Chunk, ChunkMetadata, chunk_id_for
 from ..config import SemanticConfig, Separator
-from ..errors import ProviderMissingError
+from ..errors import ChunkweaveError, ProviderMissingError
 from .base import SimilarityProvider
 from .recursive import _compile_separator, _split_with_separator, split_text
 
@@ -79,6 +79,11 @@ class SemanticChunker:
                 for (s1, e1), (s2, e2) in itertools.pairwise(units)
             ]
             scores = self._scores(pairs)
+            if len(scores) != len(pairs):
+                raise ChunkweaveError(
+                    f"provider returned {len(scores)} scores for "
+                    f"{len(pairs)} unit pairs"
+                )
             cur_start, cur_end = units[0]
             cur_score: float | None = None
             for i, score in enumerate(scores):

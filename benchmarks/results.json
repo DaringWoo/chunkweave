@@ -14,23 +14,23 @@
   "results": {
     "flat_sliding_window": {
       "chunks_produced": 24,
-      "best_seconds": 5.3e-05,
-      "median_seconds": 5.7e-05
+      "best_seconds": 5.4e-05,
+      "median_seconds": 6.6e-05
     },
     "flat_recursive": {
       "chunks_produced": 32,
-      "best_seconds": 0.000121,
-      "median_seconds": 0.000126
+      "best_seconds": 0.000123,
+      "median_seconds": 0.000127
     },
     "flat_semantic": {
       "chunks_produced": 79,
-      "best_seconds": 0.001021,
-      "median_seconds": 0.001022
+      "best_seconds": 0.001048,
+      "median_seconds": 0.000982
     },
     "hierarchical_rec_sw": {
       "chunks_produced": 72,
-      "best_seconds": 0.000364,
-      "median_seconds": 0.000356
+      "best_seconds": 0.000421,
+      "median_seconds": 0.000357
     }
   }
 }

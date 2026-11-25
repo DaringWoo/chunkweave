@@ -35,8 +35,9 @@ class ChunkResult:
     chunks: list[Chunk]
 
     def __post_init__(self) -> None:
-        self.chunks.sort(
-            key=lambda c: (c.start_offset, c.metadata.organization.get("level", 0))
+        self.chunks = sorted(
+            self.chunks,
+            key=lambda c: (c.start_offset, c.metadata.organization.get("level", 0)),
         )
 
     def tree(self) -> list[ChunkNode]:

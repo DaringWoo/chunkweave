@@ -62,10 +62,12 @@ class ChunkEngine:
         the ``provider`` kwarg) overrides the engine-level provider for this
         call only.
         """
-        call_provider = provider or self._provider
+        call_provider = provider if provider is not None else self._provider
         if isinstance(config, Mapping):
             raw = dict(config)
-            call_provider = raw.pop("provider", None) or call_provider
+            dict_provider = raw.pop("provider", None)
+            if dict_provider is not None:
+                call_provider = dict_provider
             cfg = engine_config_from_dict(raw)
         elif isinstance(config, FlatConfig | HierarchicalConfig):
             cfg = config

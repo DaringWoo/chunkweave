@@ -4,7 +4,7 @@ import itertools
 
 import pytest
 
-from chunkweave import ProviderMissingError, SemanticConfig
+from chunkweave import ChunkweaveError, ProviderMissingError, SemanticConfig
 from chunkweave.strategies import SemanticChunker
 
 
@@ -67,6 +67,15 @@ def test_score_batch_used_when_available():
     make(provider).chunk("a。b。c。")
     assert provider.batch_used
     assert provider.calls  # still records each pair
+
+
+def test_score_batch_length_mismatch_raises():
+    class ShortBatchProvider(FakeProvider):
+        def score_batch(self, pairs):
+            return [self.score(left, right) for left, right in pairs[:-1]]
+
+    with pytest.raises(ChunkweaveError, match="scores"):
+        make(ShortBatchProvider()).chunk("a。b。c。")
 
 
 # ---- 6.2 boundaries ----
