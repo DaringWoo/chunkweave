@@ -1,0 +1,72 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "chunkweave"
+version = "0.1.0"
+description = "A composable text chunking and organization engine with decoupled strategies and organization structures"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "daringwoo" }]
+keywords = ["chunking", "rag", "text-splitting", "nlp"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Text Processing",
+]
+dependencies = []
+
+[project.optional-dependencies]
+# Semantic similarity adapters (embedding clients) are opt-in extras; the
+# core package stays dependency-free.
+semantic = []
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "build>=1.2",
+    "twine>=5",
+]
+
+[project.urls]
+Homepage = "https://github.com/daringwoo/chunkweave"
+Documentation = "https://github.com/daringwoo/chunkweave#readme"
+Issues = "https://github.com/daringwoo/chunkweave/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/chunkweave"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/chunkweave", "tests", "README.md", "LICENSE", "pyproject.toml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+# CJK punctuation is intentional: these are the default Chinese separators.
+allowed-confusables = ["！", "？", "；", "，", "。"]
+
+[tool.mypy]
+python_version = "3.11"
+mypy_path = "src"
+packages = ["chunkweave"]
+strict = true
+disallow_any_generics = false
+warn_return_any = false
+
+[[tool.mypy.overrides]]
+module = "chunkweave.strategies.*"
+disallow_untyped_defs = true
