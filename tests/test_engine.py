@@ -32,7 +32,7 @@ class Every2Chunker:
         self.size = config.get("size", 2)
 
     def chunk(self, text: str) -> Sequence[Chunk]:
-        from chunkweave.chunk import ChunkMetadata, chunk_id_for
+        from chunkweave.models import ChunkMetadata, chunk_id_for
 
         return [
             Chunk(

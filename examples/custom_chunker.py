@@ -5,8 +5,7 @@ import sys
 from collections.abc import Sequence
 from typing import ClassVar
 
-from chunkweave import Chunk, ChunkEngine, ChunkMetadata
-from chunkweave.chunk import chunk_id_for
+from chunkweave import Chunk, ChunkEngine, ChunkMetadata, chunk_id_for
 
 sys.stdout.reconfigure(encoding="utf-8")
 

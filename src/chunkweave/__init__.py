@@ -1,6 +1,5 @@
 """chunkweave: composable text chunking and organization engine."""
 
-from .chunk import Chunk, ChunkMetadata
 from .config import (
     EngineConfig,
     FlatConfig,
@@ -11,17 +10,21 @@ from .config import (
     SlidingWindowConfig,
     engine_config_from_dict,
 )
-from .engine import ChunkEngine
-from .errors import (
+from .engine import ChunkEngine, Registry, default_registry
+from .metadata import attach_custom_metadata, reserved_field_names
+from .models import (
+    Chunk,
+    ChunkMetadata,
+    ChunkNode,
+    ChunkResult,
     ChunkweaveError,
     ConfigError,
     MetadataConflictError,
     ProviderMissingError,
     RegistryConflictError,
     UnregisteredStrategyError,
+    chunk_id_for,
 )
-from .metadata import attach_custom_metadata, reserved_field_names
-from .registry import Registry, default_registry
 from .strategies import (
     Chunker,
     ProviderAware,
@@ -30,7 +33,6 @@ from .strategies import (
     SimilarityProvider,
     SlidingWindowChunker,
 )
-from .tree import ChunkNode, ChunkResult
 
 __version__ = "0.1.0"
 
@@ -62,6 +64,7 @@ __all__ = [
     "UnregisteredStrategyError",
     "__version__",
     "attach_custom_metadata",
+    "chunk_id_for",
     "default_registry",
     "engine_config_from_dict",
     "reserved_field_names",

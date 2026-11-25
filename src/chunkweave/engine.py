@@ -1,17 +1,89 @@
-"""Public API entry point: ChunkEngine."""
+"""Public API entry point: strategy registry and ChunkEngine."""
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from typing import Any
 
-from .config import EngineConfig, FlatConfig, HierarchicalConfig, engine_config_from_dict
-from .errors import ConfigError
-from .organization.flat import FlatOrganization
-from .organization.hierarchical import HierarchicalOrganization
-from .registry import Registry, default_registry
-from .strategies.base import SimilarityProvider
-from .tree import ChunkResult
+from . import organization
+from .config import (
+    EngineConfig,
+    FlatConfig,
+    HierarchicalConfig,
+    LevelConfig,
+    RecursiveConfig,
+    SemanticConfig,
+    SlidingWindowConfig,
+    engine_config_from_dict,
+)
+from .models import (
+    ChunkResult,
+    ConfigError,
+    RegistryConflictError,
+    UnregisteredStrategyError,
+)
+from .strategies import (
+    Chunker,
+    ProviderAware,
+    RecursiveChunker,
+    SemanticChunker,
+    SimilarityProvider,
+    SlidingWindowChunker,
+)
+
+ChunkerFactory = Callable[[Mapping[str, Any]], Chunker]
+
+
+class Registry:
+    """Maps strategy names to chunker factories.
+
+    Only responsible for registration and lookup; hierarchy execution,
+    parent-child relations and metadata assembly live elsewhere.
+    """
+
+    def __init__(self, register_builtins: bool = True) -> None:
+        self._factories: dict[str, ChunkerFactory] = {}
+        if register_builtins:
+            self.register(
+                "sliding_window",
+                lambda cfg: SlidingWindowChunker(SlidingWindowConfig.from_dict(cfg)),
+            )
+            self.register(
+                "recursive",
+                lambda cfg: RecursiveChunker(RecursiveConfig.from_dict(cfg)),
+            )
+            self.register(
+                "semantic",
+                lambda cfg: SemanticChunker(SemanticConfig.from_dict(cfg)),
+            )
+
+    def register(
+        self, name: str, factory: ChunkerFactory, *, replace: bool = False
+    ) -> None:
+        """Register ``factory`` under ``name``.
+
+        Existing names are rejected unless ``replace=True`` is given
+        explicitly; silent overwrites are not allowed.
+        """
+        if name in self._factories and not replace:
+            raise RegistryConflictError(name)
+        self._factories[name] = factory
+
+    def create(self, name: str, config: Mapping[str, Any] | None = None) -> Chunker:
+        """Instantiate the strategy registered under ``name``."""
+        try:
+            factory = self._factories[name]
+        except KeyError:
+            raise UnregisteredStrategyError(name, self.names()) from None
+        return factory(config or {})
+
+    def names(self) -> list[str]:
+        return list(self._factories)
+
+
+def default_registry() -> Registry:
+    """A registry pre-populated with the three builtin strategies."""
+    return Registry()
 
 
 class ChunkEngine:
@@ -76,10 +148,26 @@ class ChunkEngine:
                 "config", f"expected a config dict or config object, got {config!r}"
             )
 
-        organization: FlatOrganization | HierarchicalOrganization
+        # Flat is the single-level special case without organization fields.
+        levels: list[LevelConfig]
+        write_organization: bool
         if isinstance(cfg, FlatConfig):
-            organization = FlatOrganization(self.registry, call_provider)
+            levels = [LevelConfig(strategy=cfg.strategy, config=cfg.config)]
+            write_organization = False
         else:
-            organization = HierarchicalOrganization(self.registry, call_provider)
-        chunks = organization.run(text, cfg)  # type: ignore[arg-type]
+            levels = list(cfg.levels)
+            write_organization = True
+
+        chunkers = [self.registry.create(lv.strategy, lv.config) for lv in levels]
+        for chunker in chunkers:
+            if call_provider is not None and isinstance(chunker, ProviderAware):
+                chunker.set_provider(call_provider)
+
+        chunks = organization.run(
+            text,
+            chunkers,
+            cfg.custom,
+            [dict(lv.metadata) for lv in levels],
+            write_organization=write_organization,
+        )
         return ChunkResult(chunks)

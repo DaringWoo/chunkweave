@@ -11,10 +11,12 @@ from chunkweave import (
     UnregisteredStrategyError,
     default_registry,
 )
-from chunkweave.strategies import Chunker
-from chunkweave.strategies.recursive import RecursiveChunker
-from chunkweave.strategies.semantic import SemanticChunker
-from chunkweave.strategies.sliding_window import SlidingWindowChunker
+from chunkweave.strategies import (
+    Chunker,
+    RecursiveChunker,
+    SemanticChunker,
+    SlidingWindowChunker,
+)
 
 
 def test_builtin_strategies_registered():
@@ -60,7 +62,7 @@ class ReverseChunker:
         self.unit = config.get("unit", 5)
 
     def chunk(self, text: str) -> Sequence[Chunk]:
-        from chunkweave.chunk import ChunkMetadata, chunk_id_for
+        from chunkweave.models import ChunkMetadata, chunk_id_for
 
         return [
             Chunk(

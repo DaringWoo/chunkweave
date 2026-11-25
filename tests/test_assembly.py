@@ -3,7 +3,7 @@
 import pytest
 
 from chunkweave import ChunkEngine, MetadataConflictError
-from chunkweave.assembly import custom_for_level, validate_custom_across_levels
+from chunkweave.metadata import custom_for_level, validate_custom_across_levels
 
 
 def _hier_config(**over):

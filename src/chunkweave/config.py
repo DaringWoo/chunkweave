@@ -8,7 +8,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-from .errors import ConfigError
+from .models import ConfigError
 
 Separator = str | re.Pattern[str]
 KeepSeparator = Literal["previous", "next", "none"]

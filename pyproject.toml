@@ -68,5 +68,5 @@ disallow_any_generics = false
 warn_return_any = false
 
 [[tool.mypy.overrides]]
-module = "chunkweave.strategies.*"
+module = "chunkweave.strategies"
 disallow_untyped_defs = true
