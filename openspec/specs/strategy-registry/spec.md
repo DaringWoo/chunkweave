@@ -1,14 +1,13 @@
-# Spec Delta
+# strategy-registry Specification
 
 ## Purpose
-
 定义切块策略协议与策略注册表的行为契约：内置策略注册、自定义 Chunker 注册、按名查找、命名冲突与未注册策略的错误处理。
 
-## ADDED Requirements
+## Requirements
 
 ### Requirement: 策略协议
 
-所有切块策略 MUST 实现统一协议：接收输入文本与自身配置，产出统一 Chunk 结果集合与 Strategy Metadata。协议 MUST 允许各策略拥有独立配置参数，不强制共享所有参数；策略 MUST 单独可测，不依赖组织层。
+所有切块策略 MUST 实现统一协议：接收输入文本与自身配置，产出统一 Chunk 结果集合与 Strategy Metadata。每个策略 MUST 声明其产出的 Strategy Metadata 键名集合（`metadata_keys`），供 Custom 元数据保留字段冲突检测；协议 MUST 允许各策略拥有独立配置参数，不强制共享所有参数；策略 MUST 单独可测，不依赖组织层。
 
 #### Scenario: 协议一致调用
 
@@ -19,6 +18,11 @@
 
 - **WHEN** 在不实例化任何组织方式的情况下直接调用策略
 - **THEN** 策略正常产出结果，无组织层依赖
+
+#### Scenario: 策略声明元数据键
+
+- **WHEN** 检查内置策略的 `metadata_keys` 声明
+- **THEN** 声明集合覆盖该策略实际产出的全部 Strategy Metadata 键（如 `sliding_window` 含 `window_index`、`overlap_size`）
 
 ### Requirement: 内置策略注册
 
@@ -31,7 +35,7 @@ Registry MUST 预注册三个内置策略，名称固定为 `sliding_window`、`
 
 ### Requirement: 自定义 Chunker 注册
 
-Registry MUST 允许调用方注册符合策略协议的自定义 Chunker，注册后即可与内置策略同样按名获取使用。
+Registry MUST 允许调用方注册符合策略协议（含 `metadata_keys` 声明）的自定义 Chunker，注册后即可与内置策略同样按名获取使用。
 
 #### Scenario: 注册并获取自定义策略
 
@@ -55,6 +59,11 @@ Registry MUST 允许调用方注册符合策略协议的自定义 Chunker，注�
 
 - **WHEN** 以已存在的名称再次注册 Chunker 且未显式声明替换
 - **THEN** Registry 抛出清晰异常，原注册保持不变
+
+#### Scenario: 显式替换生效
+
+- **WHEN** 以已存在的名称注册 Chunker 且显式声明替换
+- **THEN** 新 Chunker 替换原注册，后续按名获取返回新实现
 
 ### Requirement: Registry 职责边界
 

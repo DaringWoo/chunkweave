@@ -1,0 +1,36 @@
+{
+  "environment": {
+    "python": "3.13.16",
+    "platform": "Windows-10-10.0.19045-SP0",
+    "processor": "Intel64 Family 6 Model 158 Stepping 10, GenuineIntel",
+    "seed": 20261125,
+    "repeat": 5,
+    "number_per_repeat": 20
+  },
+  "input": {
+    "text_codepoints": 10515,
+    "paragraphs": 40
+  },
+  "results": {
+    "flat_sliding_window": {
+      "chunks_produced": 24,
+      "best_seconds": 5.3e-05,
+      "median_seconds": 5.7e-05
+    },
+    "flat_recursive": {
+      "chunks_produced": 32,
+      "best_seconds": 0.000121,
+      "median_seconds": 0.000126
+    },
+    "flat_semantic": {
+      "chunks_produced": 79,
+      "best_seconds": 0.001021,
+      "median_seconds": 0.001022
+    },
+    "hierarchical_rec_sw": {
+      "chunks_produced": 72,
+      "best_seconds": 0.000364,
+      "median_seconds": 0.000356
+    }
+  }
+}
