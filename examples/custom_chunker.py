@@ -1,13 +1,24 @@
-"""Registering a custom chunker and using it at any hierarchy level."""
+"""Registering a custom chunker and using it at any pipeline level."""
 
 import re
 import sys
-from collections.abc import Sequence
-from typing import ClassVar
+from pathlib import Path
 
-from chunkweave import Chunk, ChunkEngine, ChunkMetadata, chunk_id_for
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
+
+from chunkweave import ChunkEngine, ChunkSpan, Policy
 
 sys.stdout.reconfigure(encoding="utf-8")
+
+POLICIES = Path(__file__).parent / "policies"
+
+
+class WordsParams(BaseModel):
+    """Params schema for the ``words`` strategy."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    max_words: StrictInt = Field(default=4, gt=0)
 
 
 class WordChunker:
@@ -17,47 +28,42 @@ class WordChunker:
     whitespace between groups is uncovered (like keep_separator="none").
     """
 
-    metadata_keys: ClassVar[frozenset[str]] = frozenset({"word_count"})
+    def __init__(self, params: WordsParams) -> None:
+        self.max_words = params.max_words
 
-    def __init__(self, config):
-        self.max_words = config.get("max_words", 4)
-
-    def chunk(self, text: str) -> Sequence[Chunk]:
+    def chunk(self, text: str) -> list[ChunkSpan]:
         word_spans = [m.span() for m in re.finditer(r"\S+", text)]
-        chunks: list[Chunk] = []
+        spans: list[ChunkSpan] = []
         for i in range(0, len(word_spans), self.max_words):
             group = word_spans[i : i + self.max_words]
             start, end = group[0][0], group[-1][1]
-            chunks.append(
-                Chunk(
-                    chunk_id=chunk_id_for(len(chunks)),
+            spans.append(
+                ChunkSpan(
                     content=text[start:end],
                     start_offset=start,
                     end_offset=end,
-                    metadata=ChunkMetadata(strategy={"word_count": len(group)}),
+                    strategy_metadata={"word_count": len(group)},
                 )
             )
-        return chunks
+        return spans
 
 
 def main() -> None:
     engine = ChunkEngine()
-    engine.register("words", lambda cfg: WordChunker(cfg))
-    result = engine.chunk(
+    engine.register(
+        "words",
+        lambda params, _provider: WordChunker(params),
+        params_model=WordsParams,
+    )
+    result = engine.execute(
         "the quick brown fox jumps over the lazy dog",
-        {
-            "organization": "hierarchical",
-            "levels": [
-                {"strategy": "words", "config": {"max_words": 3}},
-                {"strategy": "sliding_window", "config": {"chunk_size": 8}},
-            ],
-        },
+        Policy.from_file(POLICIES / "words.yaml"),
     )
     for c in result.chunks:
-        org = c.metadata.organization
         print(
-            f"{c.chunk_id} L{org['level']} seq={org['sequence']} "
-            f"[{c.start_offset},{c.end_offset}) {c.content!r} strat={c.metadata.strategy}"
+            f"{c.chunk_id} L{c.level} seq={c.sequence} "
+            f"[{c.start_offset},{c.end_offset}) {c.content!r} "
+            f"strat={c.strategy_metadata}"
         )
 
 

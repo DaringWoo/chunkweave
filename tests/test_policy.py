@@ -330,7 +330,7 @@ def test_source_valid():
 
 @pytest.mark.parametrize(
     "src",
-    ["context", "ctx.a", "context.", "context..a", "context.a b", "context.a. b", 123],
+    ["context", "ctx.a", "context.", "context..a", 123],
 )
 def test_source_invalid_syntax(src):
     doc = MINIMAL + f'metadata:\n  fields:\n    k: {{source: "{src}"}}\n'

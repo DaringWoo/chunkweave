@@ -1,0 +1,26 @@
+api_version: chunkweave/v1
+policy:
+  id: technical-doc
+  name: 技术文档三层切分
+  version: 1.0.0
+pipeline:
+  levels:
+    - name: section
+      strategy: recursive
+      params:
+        chunk_size: 60
+        separators: ["\n\n"]
+    - name: paragraph
+      strategy: recursive
+      params:
+        chunk_size: 40
+        separators: ["。", "\n"]
+    - name: topic
+      strategy: semantic
+      params:
+        threshold: 0.5
+        chunk_size: 30
+        unit_separators: ["。"]
+metadata:
+  fields:
+    doc_kind: {value: technical}

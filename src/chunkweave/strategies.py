@@ -6,10 +6,6 @@
 chunking. Builtin strategies: ``sliding_window``, ``recursive``,
 ``semantic``.
 
-The ``Legacy*`` classes adapt the old dataclass-driven API (config
-dataclass in, :class:`Chunk` out, ``metadata_keys`` declared) onto the new
-chunkers; they exist only so the pre-refactor engine keeps working and are
-removed together with the old API.
 """
 
 from __future__ import annotations
@@ -18,7 +14,7 @@ import itertools
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import (
     BaseModel,
@@ -30,17 +26,7 @@ from pydantic import (
     model_validator,
 )
 
-from .models import (
-    Chunk,
-    ChunkMetadata,
-    ChunkSpan,
-    ChunkweaveError,
-    ProviderMissingError,
-    chunk_id_for,
-)
-
-if TYPE_CHECKING:
-    from .config import RecursiveConfig, SemanticConfig, SlidingWindowConfig
+from .models import ChunkSpan, ChunkweaveError, ProviderMissingError
 
 Separator = str | re.Pattern[str]
 KeepSeparator = Literal["previous", "next", "none"]
@@ -81,13 +67,6 @@ def compile_separator(decl: SeparatorDecl) -> Separator:
     if isinstance(decl, SeparatorSpec):
         return re.compile(decl.value) if decl.regex else decl.value
     return decl
-
-
-def _decl_from_separator(sep: Separator) -> SeparatorDecl:
-    """Convert an old ``Separator`` (``str`` | ``re.Pattern``) to declared form."""
-    if isinstance(sep, re.Pattern):
-        return SeparatorSpec(value=sep.pattern, regex=True)
-    return sep
 
 
 def _default_separators() -> list[SeparatorDecl]:
@@ -186,30 +165,6 @@ class SimilarityProvider(Protocol):
 
     def score(self, left: str, right: str) -> float:
         """Similarity of two adjacent units in ``[0, 1]``."""
-        ...
-
-
-@runtime_checkable
-class LegacyChunker(Protocol):
-    """The pre-refactor strategy contract (config in, ``Chunk`` out).
-
-    Still consumed by the old organization/engine path; removed with it.
-    """
-
-    metadata_keys: ClassVar[frozenset[str]]
-    """Strategy metadata keys this chunker may produce."""
-
-    def chunk(self, text: str) -> Sequence[Chunk]:
-        """Split ``text`` and return chunks in stable input order."""
-        ...
-
-
-@runtime_checkable
-class ProviderAware(Protocol):
-    """A chunker that accepts an injected similarity provider."""
-
-    def set_provider(self, provider: SimilarityProvider) -> None:
-        """Inject the similarity provider used by ``chunk``."""
         ...
 
 
@@ -365,21 +320,6 @@ def _apply_overlap(merged: list[_Fragment], overlap: int) -> list[_Fragment]:
         new_start = max(prev.start + 1, cur.start - carry)
         out.append(_Fragment(new_start, cur.end, cur.separator_used, cur.separator_level))
     return out
-
-
-def split_text(
-    text: str,
-    separators: Sequence[Separator],
-    chunk_size: int,
-    keep: KeepSeparator = "previous",
-    overlap: int = 0,
-    max_depth: int | None = None,
-) -> list[tuple[int, int]]:
-    """Split ``text`` into ``(start, end)`` chunk ranges via the recursive mechanism."""
-    leaves = _leaf_fragments(text, separators, keep, chunk_size, max_depth)
-    merged = _merge_fragments(leaves, chunk_size)
-    merged = _apply_overlap(merged, overlap)
-    return [(f.start, f.end) for f in merged]
 
 
 # ---------------------------------------------------------------------------
@@ -567,92 +507,3 @@ class SemanticChunker:
                     )
                 )
         return spans
-
-
-# ---------------------------------------------------------------------------
-# Legacy adapters (old API compatibility; removed with the old API)
-# ---------------------------------------------------------------------------
-
-
-def _spans_to_chunks(spans: Sequence[ChunkSpan]) -> list[Chunk]:
-    """Convert ChunkSpans back into old-style ``Chunk`` objects."""
-    return [
-        Chunk(
-            chunk_id=chunk_id_for(i),
-            content=s.content,
-            start_offset=s.start_offset,
-            end_offset=s.end_offset,
-            metadata=ChunkMetadata(strategy=dict(s.strategy_metadata)),
-        )
-        for i, s in enumerate(spans)
-    ]
-
-
-class LegacySlidingWindowChunker(SlidingWindowChunker):
-    """Old ``SlidingWindowConfig``-driven wrapper over the new chunker."""
-
-    metadata_keys: ClassVar[frozenset[str]] = frozenset({"window_index", "overlap_size"})
-
-    def __init__(self, config: SlidingWindowConfig) -> None:
-        self.config = config
-        super().__init__(
-            SlidingWindowParams(chunk_size=config.chunk_size, overlap=config.overlap)
-        )
-
-    def chunk(self, text: str) -> Sequence[Chunk]:  # type: ignore[override]
-        return _spans_to_chunks(super().chunk(text))
-
-
-class LegacyRecursiveChunker(RecursiveChunker):
-    """Old ``RecursiveConfig``-driven wrapper over the new chunker."""
-
-    metadata_keys: ClassVar[frozenset[str]] = frozenset(
-        {"separator_used", "separator_level"}
-    )
-
-    def __init__(self, config: RecursiveConfig) -> None:
-        self.config = config
-        super().__init__(
-            RecursiveParams(
-                chunk_size=config.chunk_size,
-                separators=[_decl_from_separator(s) for s in config.separators],
-                overlap=config.overlap,
-                keep_separator=config.keep_separator,
-                max_depth=config.max_depth,
-            )
-        )
-
-    def chunk(self, text: str) -> Sequence[Chunk]:  # type: ignore[override]
-        return _spans_to_chunks(super().chunk(text))
-
-
-class LegacySemanticChunker(SemanticChunker):
-    """Old ``SemanticConfig``-driven wrapper over the new chunker.
-
-    Keeps the old optional-provider shape: the provider may be injected after
-    construction via ``set_provider``; chunking without one raises
-    :class:`ProviderMissingError`.
-    """
-
-    metadata_keys: ClassVar[frozenset[str]] = frozenset({"boundary_score"})
-
-    def __init__(
-        self, config: SemanticConfig, provider: SimilarityProvider | None = None
-    ) -> None:
-        self.config = config
-        super().__init__(
-            SemanticParams(
-                threshold=config.threshold,
-                chunk_size=config.chunk_size,
-                unit_separators=[
-                    _decl_from_separator(s) for s in config.unit_separators
-                ],
-            ),
-            provider,
-        )
-
-    def set_provider(self, provider: SimilarityProvider) -> None:
-        self.provider = provider
-
-    def chunk(self, text: str) -> Sequence[Chunk]:  # type: ignore[override]
-        return _spans_to_chunks(super().chunk(text))

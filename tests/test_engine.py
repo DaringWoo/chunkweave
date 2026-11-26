@@ -1,232 +1,361 @@
-"""ChunkEngine public API: execution, registration, views, serialization."""
-
-from collections.abc import Sequence
-from typing import ClassVar
+"""ChunkEngine public API: execute/validate/compile, registration, tracing."""
 
 import pytest
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
+import chunkweave
 from chunkweave import (
-    Chunk,
     ChunkEngine,
-    ChunkNode,
     ChunkResult,
-    FlatConfig,
-    HierarchicalConfig,
-    LevelConfig,
+    ChunkSpan,
+    ExecutionPlan,
+    PolicyValidationError,
     ProviderMissingError,
+    RegistryConflictError,
     UnregisteredStrategyError,
 )
+from conftest import FakeProvider, make_policy
 
 
-class FakeProvider:
-    def score(self, left: str, right: str) -> float:
-        return 0.9 if left[0] == right[0] else 0.1
+def single_level(strategy="sliding_window", params=None, name="l0", **kw):
+    return make_policy(
+        [{"name": name, "strategy": strategy, "params": params or {}}], **kw
+    )
 
 
-class Every2Chunker:
-    """Custom chunker: fixed 2-code-point pieces."""
+class EveryNParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    size: StrictInt = Field(default=2, gt=0)
 
-    metadata_keys: ClassVar[frozenset[str]] = frozenset({"half"})
 
-    def __init__(self, config):
-        self.size = config.get("size", 2)
+class EveryNChunker:
+    """Custom chunker: fixed N-code-point pieces."""
 
-    def chunk(self, text: str) -> Sequence[Chunk]:
-        from chunkweave.models import ChunkMetadata, chunk_id_for
+    def __init__(self, params):
+        self.size = params.size
 
+    def chunk(self, text: str) -> list[ChunkSpan]:
         return [
-            Chunk(
-                chunk_id=chunk_id_for(i),
+            ChunkSpan(
                 content=text[s : s + self.size],
                 start_offset=s,
                 end_offset=min(s + self.size, len(text)),
-                metadata=ChunkMetadata(strategy={"half": i}),
+                strategy_metadata={"half": i},
             )
             for i, s in enumerate(range(0, len(text), self.size))
         ]
 
 
-def test_engine_flat_one_call():
+class NeedyParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class NeedyChunker:
+    """Custom chunker that requires a provider."""
+
+    def __init__(self, provider):
+        self.provider = provider
+
+    def chunk(self, text: str) -> list[ChunkSpan]:
+        if self.provider is None:
+            raise ProviderMissingError("needy")
+        return [ChunkSpan(content=text, start_offset=0, end_offset=len(text))]
+
+
+# ---- execute basics ----
+
+
+def test_execute_single_level():
     engine = ChunkEngine()
-    result = engine.chunk(
+    result = engine.execute(
         "abcdefgh",
-        {"organization": "flat", "strategy": "sliding_window", "config": {"chunk_size": 3}},
+        single_level(params={"chunk_size": 3}),
     )
     assert isinstance(result, ChunkResult)
     assert [c.content for c in result.chunks] == ["abc", "def", "gh"]
 
 
-def test_engine_hierarchical_one_call():
+def test_execute_two_levels():
     engine = ChunkEngine()
-    result = engine.chunk(
+    result = engine.execute(
         "ab\ncdef\n\ngh",
-        {
-            "organization": "hierarchical",
-            "levels": [
-                {"strategy": "recursive", "config": {"chunk_size": 10, "separators": ["\n\n"]}},
-                {"strategy": "sliding_window", "config": {"chunk_size": 3}},
-            ],
-        },
+        make_policy(
+            [
+                {"name": "l0", "strategy": "recursive",
+                 "params": {"chunk_size": 10, "separators": ["\n\n"]}},
+                {"name": "l1", "strategy": "sliding_window",
+                 "params": {"chunk_size": 3}},
+            ]
+        ),
     )
     assert len(result.chunks) == 6
-    assert all("level" in c.metadata.organization for c in result.chunks)
+    assert {c.level for c in result.chunks} == {0, 1}
 
 
-def test_engine_accepts_config_objects():
+def test_execute_rejects_non_policy():
     engine = ChunkEngine()
-    flat = FlatConfig(strategy="sliding_window", config={"chunk_size": 2})
-    r1 = engine.chunk("abcd", flat)
-    assert len(r1.chunks) == 2
-    hier = HierarchicalConfig(
-        levels=[LevelConfig(strategy="sliding_window", config={"chunk_size": 2})]
-    )
-    r2 = engine.chunk("abcd", hier)
-    assert all(c.metadata.organization["level"] == 0 for c in r2.chunks)
+    for bad in ("policy.yaml", "api_version: chunkweave/v1", {"pipeline": {}}, 42):
+        with pytest.raises(TypeError):
+            engine.execute("abc", bad)
+
+
+def test_execute_rejects_non_text():
+    engine = ChunkEngine()
+    with pytest.raises(TypeError):
+        engine.execute(b"bytes", single_level(params={"chunk_size": 2}))
+    with pytest.raises(TypeError):
+        engine.execute(None, single_level(params={"chunk_size": 2}))
+
+
+def test_compile_and_validate_reject_non_policy():
+    engine = ChunkEngine()
+    for bad in ("x.yaml", {"pipeline": {}}, None):
+        with pytest.raises(TypeError):
+            engine.compile(bad)
+        with pytest.raises(TypeError):
+            engine.validate(bad)
 
 
 def test_unregistered_strategy_surfaces_error():
     engine = ChunkEngine()
     with pytest.raises(UnregisteredStrategyError) as exc:
-        engine.chunk("abc", {"organization": "flat", "strategy": "nope", "config": {}})
+        engine.execute("abc", single_level(strategy="nope"))
     assert "nope" in str(exc.value)
-    with pytest.raises(UnregisteredStrategyError):
-        engine.chunk(
+
+
+def test_execute_unknown_param_rejected():
+    engine = ChunkEngine()
+    with pytest.raises(PolicyValidationError) as exc:
+        engine.execute(
             "abc",
-            {
-                "organization": "hierarchical",
-                "levels": [{"strategy": "nope", "config": {}}],
-            },
+            single_level(params={"chunk_size": 4, "nope": 1}),
         )
+    assert "nope" in str(exc.value)
 
 
-def test_semantic_without_provider_surfaces_error():
+# ---- validate ----
+
+
+def test_validate_returns_none_and_does_not_chunk():
+    class ExplodingChunker:
+        def chunk(self, text):
+            raise AssertionError("chunk() must not be called by validate")
+
     engine = ChunkEngine()
-    with pytest.raises(ProviderMissingError):
-        engine.chunk(
-            "a。b。",
-            {
-                "organization": "flat",
-                "strategy": "semantic",
-                "config": {"threshold": 0.5, "chunk_size": 10},
-            },
-        )
-
-
-def test_provider_override_per_call():
-    engine = ChunkEngine()
-    result = engine.chunk(
-        "苹果。香蕉。",
-        {
-            "organization": "flat",
-            "strategy": "semantic",
-            "config": {"threshold": 0.5, "chunk_size": 10},
-            "provider": FakeProvider(),
-        },
+    engine.register(
+        "boom",
+        lambda params, _p: ExplodingChunker(),
+        params_model=NeedyParams,
     )
-    assert len(result.chunks) == 2
+    policy = make_policy([{"name": "l0", "strategy": "boom"}])
+    assert engine.validate(policy) is None
+
+
+def test_validate_rejects_invalid_policy():
+    engine = ChunkEngine()
+    with pytest.raises(UnregisteredStrategyError):
+        engine.validate(single_level(strategy="ghost"))
+
+
+# ---- provider ----
+
+
+def test_semantic_needs_provider_before_chunking():
+    engine = ChunkEngine()
+    policy = single_level(
+        strategy="semantic",
+        params={"threshold": 0.5, "chunk_size": 10},
+    )
+    with pytest.raises(ProviderMissingError):
+        engine.execute("a。b。", policy)
+
+
+def test_custom_requires_provider_needs_provider():
+    engine = ChunkEngine()
+    engine.register(
+        "needy",
+        lambda params, provider: NeedyChunker(provider),
+        params_model=NeedyParams,
+        requires_provider=True,
+    )
+    policy = single_level(strategy="needy")
+    with pytest.raises(ProviderMissingError):
+        engine.execute("abc", policy)
+    # with a provider the same policy runs
+    result = engine.execute("abc", policy, provider=FakeProvider())
+    assert len(result.chunks) == 1
+
+
+def test_missing_provider_error_before_any_chunking():
+    """Provider check happens before chunkers are even constructed."""
+    constructed = []
+
+    class TrackingChunker:
+        def __init__(self):
+            constructed.append(1)
+
+        def chunk(self, text):
+            return []
+
+    engine = ChunkEngine()
+    engine.register(
+        "tracked",
+        lambda params, _p: TrackingChunker(),
+        params_model=NeedyParams,
+    )
+    policy = make_policy(
+        [
+            {"name": "l0", "strategy": "tracked"},
+            {"name": "l1", "strategy": "semantic",
+             "params": {"threshold": 0.5, "chunk_size": 4}},
+        ]
+    )
+    with pytest.raises(ProviderMissingError):
+        engine.execute("abc", policy)
+    assert constructed == []  # no chunker was even created
+
+
+def test_provider_exception_propagates():
+    class BadProvider:
+        def score(self, left, right):
+            raise ValueError("embedding service down")
+
+    engine = ChunkEngine()
+    policy = single_level(
+        strategy="semantic",
+        params={"threshold": 0.5, "chunk_size": 10},
+    )
+    with pytest.raises(ValueError, match="embedding service down"):
+        engine.execute("a。b。c。", policy, provider=BadProvider())
+
+
+# ---- registration ----
 
 
 def test_register_custom_chunker_used_at_any_level():
     engine = ChunkEngine()
-    engine.register("every2", lambda cfg: Every2Chunker(cfg))
-    flat = engine.chunk(
+    engine.register(
+        "everyn", lambda params, _p: EveryNChunker(params), params_model=EveryNParams
+    )
+    flat = engine.execute(
         "abcdef",
-        {"organization": "flat", "strategy": "every2", "config": {"size": 2}},
+        single_level(strategy="everyn", params={"size": 2}),
     )
     assert [c.content for c in flat.chunks] == ["ab", "cd", "ef"]
-    hier = engine.chunk(
+    hier = engine.execute(
         "abcd\n\nefgh",
-        {
-            "organization": "hierarchical",
-            "levels": [
-                {"strategy": "recursive", "config": {"chunk_size": 6, "separators": ["\n\n"]}},
-                {"strategy": "every2", "config": {"size": 3}},
-            ],
-        },
+        make_policy(
+            [
+                {"name": "l0", "strategy": "recursive",
+                 "params": {"chunk_size": 6, "separators": ["\n\n"]}},
+                {"name": "l1", "strategy": "everyn", "params": {"size": 3}},
+            ]
+        ),
     )
-    level1 = [c for c in hier.chunks if c.metadata.organization["level"] == 1]
+    level1 = [c for c in hier.chunks if c.level == 1]
     assert level1
-    assert all(c.metadata.strategy.get("half") is not None for c in level1)
+    assert all(c.strategy_metadata.get("half") is not None for c in level1)
 
 
-def test_flat_chunks_sorted_by_offset():
+def test_custom_params_validated_by_params_model():
     engine = ChunkEngine()
-    result = engine.chunk(
-        "z" * 20,
-        {"organization": "flat", "strategy": "sliding_window", "config": {"chunk_size": 6}},
+    engine.register(
+        "everyn", lambda params, _p: EveryNChunker(params), params_model=EveryNParams
     )
-    starts = [c.start_offset for c in result.chunks]
-    assert starts == sorted(starts)
+    # undefined key rejected by the params model
+    with pytest.raises(PolicyValidationError) as exc:
+        engine.execute("abc", single_level(strategy="everyn", params={"nope": 1}))
+    assert "nope" in str(exc.value)
+    # invalid value rejected too
+    with pytest.raises(PolicyValidationError):
+        engine.execute("abc", single_level(strategy="everyn", params={"size": 0}))
 
 
-def test_tree_view_matches_parent_id():
+def test_register_conflict_and_replace():
     engine = ChunkEngine()
-    result = engine.chunk(
-        "ab\ncdef\n\ngh",
-        {
-            "organization": "hierarchical",
-            "levels": [
-                {"strategy": "recursive", "config": {"chunk_size": 10, "separators": ["\n\n"]}},
-                {"strategy": "sliding_window", "config": {"chunk_size": 3}},
-            ],
-        },
+    factory = lambda p, _x: EveryNChunker(p)  # noqa: E731
+    with pytest.raises(RegistryConflictError):
+        engine.register(
+            "sliding_window", factory, params_model=EveryNParams
+        )
+    engine.register(
+        "sliding_window", factory, params_model=EveryNParams, replace=True
     )
-    roots = result.tree()
-    assert all(isinstance(n, ChunkNode) for n in roots)
-    assert len(roots) == 2
-    by_id = {c.chunk_id: c for c in result.chunks}
-    seen = set()
+    result = engine.execute(
+        "abcd", single_level(params={"size": 2})
+    )
+    assert [c.content for c in result.chunks] == ["ab", "cd"]
 
-    def walk(node):
-        seen.add(node.chunk.chunk_id)
-        for child in node.children:
-            assert child.chunk.metadata.organization["parent_id"] == node.chunk.chunk_id
-            walk(child)
 
-    for root in roots:
-        walk(root)
-    assert seen == set(by_id)
+# ---- tracing & serialization ----
+
+
+def test_result_tracing_fields():
+    engine = ChunkEngine()
+    policy = single_level(params={"chunk_size": 3}, policy_id="p42", version="2.0.1")
+    result = engine.execute("abcdef", policy)
+    assert result.policy_id == "p42"
+    assert result.policy_version == "2.0.1"
+    assert result.policy_hash == engine.compile(policy).policy_hash
+    assert result.engine_version == chunkweave.__version__
+    assert result.execution_time_ms >= 0
+
+
+def test_execution_id_unique_per_call():
+    engine = ChunkEngine()
+    policy = single_level(params={"chunk_size": 3})
+    r1 = engine.execute("abcdef", policy)
+    r2 = engine.execute("abcdef", policy)
+    assert r1.execution_id != r2.execution_id
+
+
+def test_same_input_same_chunks():
+    engine = ChunkEngine()
+    policy = single_level(params={"chunk_size": 3})
+    r1 = engine.execute("abcdefgh", policy)
+    r2 = engine.execute("abcdefgh", policy)
+    assert [c.model_dump() for c in r1.chunks] == [
+        c.model_dump() for c in r2.chunks
+    ]
 
 
 def test_result_serialization_roundtrip():
     engine = ChunkEngine()
-    result = engine.chunk(
+    result = engine.execute(
         "ab\ncdef\n\ngh",
-        {
-            "organization": "hierarchical",
-            "levels": [
-                {"strategy": "recursive", "config": {"chunk_size": 10, "separators": ["\n\n"]}},
-                {"strategy": "sliding_window", "config": {"chunk_size": 3}},
+        make_policy(
+            [
+                {"name": "l0", "strategy": "recursive",
+                 "params": {"chunk_size": 10, "separators": ["\n\n"]}},
+                {"name": "l1", "strategy": "sliding_window",
+                 "params": {"chunk_size": 3}},
             ],
-            "custom": {"doc": "测试"},
-        },
+            fields={"doc": {"value": "测试"}},
+        ),
     )
-    payload = result.to_json()
-    restored = ChunkResult.from_json(payload)
-    assert [c.to_dict() for c in restored.chunks] == [c.to_dict() for c in result.chunks]
-    # tree rebuilt from restored
-    def shape(node):
-        return (node.chunk.chunk_id, [shape(c) for c in node.children])
+    payload = result.model_dump_json()
+    import json
 
-    assert [shape(n) for n in restored.tree()] == [shape(n) for n in result.tree()]
+    assert json.loads(payload)["total"] == len(result.chunks)
+    restored = ChunkResult.model_validate_json(payload)
+    assert [c.model_dump() for c in restored.chunks] == [
+        c.model_dump() for c in result.chunks
+    ]
+    assert restored.total == result.total
+    assert restored.execution_id == result.execution_id
 
 
-def test_result_serialization_stable():
+def test_result_dump_ignores_total_on_validate():
     engine = ChunkEngine()
-    cfg = {"organization": "flat", "strategy": "sliding_window", "config": {"chunk_size": 3}}
-    assert engine.chunk("abcdef", cfg).to_json() == engine.chunk("abcdef", cfg).to_json()
+    result = engine.execute("abc", single_level(params={"chunk_size": 3}))
+    data = result.model_dump()
+    assert data["total"] == 1
+    restored = ChunkResult.model_validate(data)
+    assert restored.total == 1
 
 
-def test_config_serialization_roundtrip():
-    from chunkweave import engine_config_from_dict
-
-    raw = {
-        "organization": "hierarchical",
-        "levels": [
-            {"strategy": "recursive", "config": {"chunk_size": 50}, "name": "l0"},
-            {"strategy": "semantic", "config": {"threshold": 0.7, "chunk_size": 20}},
-        ],
-        "custom": {"a": 1},
-    }
-    cfg = engine_config_from_dict(raw)
-    assert cfg.to_dict() == raw
+def test_compile_returns_plan():
+    engine = ChunkEngine()
+    plan = engine.compile(single_level(params={"chunk_size": 3}))
+    assert isinstance(plan, ExecutionPlan)
+    assert plan.levels[0].params == {"chunk_size": 3, "overlap": 0}

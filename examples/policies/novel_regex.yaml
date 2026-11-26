@@ -1,0 +1,17 @@
+api_version: chunkweave/v1
+policy:
+  id: novel-chapters
+  name: 小说章节正则切分
+  version: 1.0.0
+pipeline:
+  levels:
+    - name: chapter
+      strategy: recursive
+      params:
+        chunk_size: 45
+        separators: [{value: "第[一二三四五六七八九十]+章", regex: true}]
+        keep_separator: next
+metadata:
+  fields:
+    doc_kind: {value: novel}
+    chapter_title: {source: context.chapter.title}

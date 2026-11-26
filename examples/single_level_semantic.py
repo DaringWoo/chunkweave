@@ -1,4 +1,4 @@
-"""Flat organization + semantic strategy with a deterministic fake provider.
+"""Single level + semantic strategy with a deterministic fake provider.
 
 A real provider would call an embedding model; this demo provider is
 deterministic and offline: similarity is high when two adjacent units start
@@ -6,12 +6,15 @@ with the same character, low otherwise.
 """
 
 import sys
+from pathlib import Path
 
-from chunkweave import ChunkEngine
+from chunkweave import ChunkEngine, Policy
 
 sys.stdout.reconfigure(encoding="utf-8")
 
 TEXT = "苹果很甜。苹果是水果。香蕉也是水果。微积分很难。导数是微积分的基础。"
+
+POLICIES = Path(__file__).parent / "policies"
 
 
 class DemoProvider:
@@ -26,19 +29,15 @@ class DemoProvider:
 
 def main() -> None:
     engine = ChunkEngine()
-    engine.set_provider(DemoProvider())
-    result = engine.chunk(
+    result = engine.execute(
         TEXT,
-        {
-            "organization": "flat",
-            "strategy": "semantic",
-            "config": {"threshold": 0.5, "chunk_size": 50, "unit_separators": ["。"]},
-        },
+        Policy.from_file(POLICIES / "semantic.yaml"),
+        provider=DemoProvider(),
     )
     for c in result.chunks:
         print(
             f"{c.chunk_id} [{c.start_offset},{c.end_offset}) "
-            f"boundary_score={c.metadata.strategy['boundary_score']} :: {c.content!r}"
+            f"boundary_score={c.strategy_metadata['boundary_score']} :: {c.content!r}"
         )
 
 

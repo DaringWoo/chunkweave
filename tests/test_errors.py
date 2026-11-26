@@ -4,8 +4,9 @@ import pytest
 
 from chunkweave import (
     ChunkweaveError,
-    ConfigError,
-    MetadataConflictError,
+    ContextResolutionError,
+    PolicyLoadError,
+    PolicyValidationError,
     ProviderMissingError,
     RegistryConflictError,
     UnregisteredStrategyError,
@@ -14,19 +15,34 @@ from chunkweave import (
 
 def test_all_errors_inherit_base():
     for exc in (
-        ConfigError("f", "r"),
+        PolicyLoadError("m"),
+        PolicyValidationError("p", "r"),
         UnregisteredStrategyError("x"),
         RegistryConflictError("x"),
-        MetadataConflictError({"k"}),
+        ContextResolutionError("f", "p", "r"),
         ProviderMissingError(),
     ):
         assert isinstance(exc, ChunkweaveError)
 
 
-def test_config_error_message_has_context():
-    err = ConfigError("chunk_size", "must be > 0, got 0")
-    assert "chunk_size" in str(err)
-    assert "must be > 0" in str(err)
+def test_unregistered_is_policy_validation():
+    err = UnregisteredStrategyError("nope", ["sliding_window"], path="pipeline.levels[0].strategy")
+    assert isinstance(err, PolicyValidationError)
+    assert err.path == "pipeline.levels[0].strategy"
+
+
+def test_policy_validation_error_has_path_and_reason():
+    err = PolicyValidationError("pipeline.levels[1].strategy", "Field required")
+    assert err.path == "pipeline.levels[1].strategy"
+    assert err.reason == "Field required"
+    assert "pipeline.levels[1].strategy" in str(err)
+    assert "Field required" in str(err)
+
+
+def test_policy_validation_error_empty_path():
+    err = PolicyValidationError("", "bad")
+    assert "at" not in str(err) or str(err).startswith("invalid policy:")
+    assert "bad" in str(err)
 
 
 def test_unregistered_strategy_error_names_strategy():
@@ -42,15 +58,19 @@ def test_registry_conflict_names_name():
     assert "recursive" in str(err)
 
 
-def test_metadata_conflict_lists_keys():
-    err = MetadataConflictError({"level", "chunk_id"})
-    assert err.keys == {"level", "chunk_id"}
-    assert "level" in str(err)
+def test_context_resolution_error_has_field_path_reason():
+    err = ContextResolutionError("author", "context.doc.author", "missing key")
+    assert err.field == "author"
+    assert err.path == "context.doc.author"
+    assert err.reason == "missing key"
+    assert "author" in str(err)
+    assert "context.doc.author" in str(err)
 
 
-def test_provider_missing_mentions_strategy():
+def test_provider_missing_mentions_strategy_and_execute():
     err = ProviderMissingError()
     assert err.strategy == "semantic"
     assert "semantic" in str(err)
+    assert "provider=" in str(err)
     with pytest.raises(ProviderMissingError):
         raise err

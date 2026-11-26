@@ -36,7 +36,7 @@ API_VERSION = "chunkweave/v1"
 """The only ``api_version`` this engine accepts."""
 
 _VERSION_RE = re.compile(r"^\d+\.\d+\.\d+$")
-_SOURCE_RE = re.compile(r"^context(\.[^.\s]+)+$")
+_SOURCE_RE = re.compile(r"^context(\.[^.]+)+$")
 
 
 class PolicyInfo(BaseModel):
@@ -160,7 +160,7 @@ class MetadataConfig(BaseModel):
         return fields
 
 
-def _format_loc(loc: tuple[Any, ...]) -> str:
+def format_loc(loc: tuple[Any, ...]) -> str:
     """Format a pydantic error ``loc`` as ``a.b[0].c`` field path."""
     parts: list[str] = []
     for item in loc:
@@ -232,7 +232,7 @@ class Policy(BaseModel):
         except ValidationError as e:
             first = e.errors()[0]
             raise PolicyValidationError(
-                _format_loc(first["loc"]), first["msg"]
+                format_loc(first["loc"]), first["msg"]
             ) from e
 
     @classmethod

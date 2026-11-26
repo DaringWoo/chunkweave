@@ -2,172 +2,199 @@
 
 from __future__ import annotations
 
+import time
+import uuid
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
+from pydantic import BaseModel
+
 from . import organization
-from .config import (
-    EngineConfig,
-    FlatConfig,
-    HierarchicalConfig,
-    LevelConfig,
-    RecursiveConfig,
-    SemanticConfig,
-    SlidingWindowConfig,
-    engine_config_from_dict,
-)
+from .compiler import ExecutionPlan, compile_policy
+from .metadata import resolve_fields
 from .models import (
     ChunkResult,
-    ConfigError,
+    ProviderMissingError,
     RegistryConflictError,
     UnregisteredStrategyError,
 )
+from .policy import Policy
 from .strategies import (
-    LegacyChunker,
-    LegacyRecursiveChunker,
-    LegacySemanticChunker,
-    LegacySlidingWindowChunker,
-    ProviderAware,
+    Chunker,
+    RecursiveChunker,
+    RecursiveParams,
+    SemanticChunker,
+    SemanticParams,
     SimilarityProvider,
+    SlidingWindowChunker,
+    SlidingWindowParams,
 )
 
-ChunkerFactory = Callable[[Mapping[str, Any]], LegacyChunker]
+ChunkerFactory = Callable[[Any, "SimilarityProvider | None"], Chunker]
+"""``(validated params instance, provider) -> Chunker``."""
+
+
+@dataclass(frozen=True)
+class StrategySpec:
+    """Registration record: factory, params schema and provider need."""
+
+    name: str
+    factory: ChunkerFactory
+    params_model: type[BaseModel]
+    requires_provider: bool = False
 
 
 class Registry:
-    """Maps strategy names to chunker factories.
+    """Maps strategy names to :class:`StrategySpec` records.
 
-    Only responsible for registration and lookup; hierarchy execution,
-    parent-child relations and metadata assembly live elsewhere.
+    Only responsible for registration and lookup; params validation happens
+    in the compiler, hierarchy execution in the runtime.
     """
 
     def __init__(self, register_builtins: bool = True) -> None:
-        self._factories: dict[str, ChunkerFactory] = {}
+        self._specs: dict[str, StrategySpec] = {}
         if register_builtins:
             self.register(
                 "sliding_window",
-                lambda cfg: LegacySlidingWindowChunker(SlidingWindowConfig.from_dict(cfg)),
+                lambda params, _: SlidingWindowChunker(params),
+                params_model=SlidingWindowParams,
             )
             self.register(
                 "recursive",
-                lambda cfg: LegacyRecursiveChunker(RecursiveConfig.from_dict(cfg)),
+                lambda params, _: RecursiveChunker(params),
+                params_model=RecursiveParams,
             )
             self.register(
                 "semantic",
-                lambda cfg: LegacySemanticChunker(SemanticConfig.from_dict(cfg)),
+                lambda params, provider: SemanticChunker(params, provider),
+                params_model=SemanticParams,
+                requires_provider=True,
             )
 
     def register(
-        self, name: str, factory: ChunkerFactory, *, replace: bool = False
+        self,
+        name: str,
+        factory: ChunkerFactory,
+        *,
+        params_model: type[BaseModel],
+        requires_provider: bool = False,
+        replace: bool = False,
     ) -> None:
         """Register ``factory`` under ``name``.
 
         Existing names are rejected unless ``replace=True`` is given
         explicitly; silent overwrites are not allowed.
         """
-        if name in self._factories and not replace:
+        if name in self._specs and not replace:
             raise RegistryConflictError(name)
-        self._factories[name] = factory
+        self._specs[name] = StrategySpec(
+            name=name,
+            factory=factory,
+            params_model=params_model,
+            requires_provider=requires_provider,
+        )
 
-    def create(self, name: str, config: Mapping[str, Any] | None = None) -> LegacyChunker:
-        """Instantiate the strategy registered under ``name``."""
+    def get(self, name: str) -> StrategySpec:
+        """Return the spec registered under ``name``."""
         try:
-            factory = self._factories[name]
+            return self._specs[name]
         except KeyError:
             raise UnregisteredStrategyError(name, self.names()) from None
-        return factory(config or {})
 
     def names(self) -> list[str]:
-        return list(self._factories)
-
-
-def default_registry() -> Registry:
-    """A registry pre-populated with the three builtin strategies."""
-    return Registry()
+        return list(self._specs)
 
 
 class ChunkEngine:
-    """Facade for chunking: execution, custom chunker registration,
-    similarity-provider injection, result views and serialization.
+    """Facade: ``validate``/``compile``/``execute`` plus chunker registration.
 
     .. code-block:: python
 
         engine = ChunkEngine()
-        engine.set_provider(my_provider)
-        result = engine.chunk(text, {
-            "organization": "hierarchical",
-            "levels": [{"strategy": "recursive", "config": {"chunk_size": 500}}],
-        })
-        result.chunks   # flat list
-        result.tree()   # nested view
+        policy = Policy.from_file("novel.yaml")
+        result = engine.execute(text, policy, context={...}, provider=...)
     """
 
     def __init__(self, registry: Registry | None = None) -> None:
-        self.registry = registry if registry is not None else default_registry()
-        self._provider: SimilarityProvider | None = None
+        self.registry = registry if registry is not None else Registry()
 
     def register(
         self,
         name: str,
-        factory: Any,
+        factory: ChunkerFactory,
         *,
+        params_model: type[BaseModel],
+        requires_provider: bool = False,
         replace: bool = False,
     ) -> None:
-        """Register a custom chunker factory ``name -> (config -> Chunker)``."""
-        self.registry.register(name, factory, replace=replace)
+        """Register a custom chunker: ``name -> (params, provider) -> Chunker``."""
+        self.registry.register(
+            name,
+            factory,
+            params_model=params_model,
+            requires_provider=requires_provider,
+            replace=replace,
+        )
 
-    def set_provider(self, provider: SimilarityProvider) -> None:
-        """Inject the similarity provider used by ``semantic`` chunking."""
-        self._provider = provider
+    @staticmethod
+    def _require_policy(policy: object) -> Policy:
+        if not isinstance(policy, Policy):
+            raise TypeError(
+                "policy must be a Policy object; load one with "
+                "Policy.from_file() or Policy.from_yaml(), "
+                f"got {type(policy).__name__}"
+            )
+        return policy
 
-    def chunk(
+    def validate(self, policy: Policy) -> None:
+        """Semantically validate ``policy`` without chunking anything."""
+        self.compile(policy)
+
+    def compile(self, policy: Policy) -> ExecutionPlan:
+        """Compile ``policy`` into its Execution IR."""
+        return compile_policy(self._require_policy(policy), self.registry)
+
+    def execute(
         self,
         text: str,
-        config: EngineConfig | Mapping[str, Any],
-        *,
+        policy: Policy,
+        context: Mapping[str, Any] | None = None,
         provider: SimilarityProvider | None = None,
     ) -> ChunkResult:
-        """Chunk ``text`` under a Flat or Hierarchical configuration.
+        """Chunk ``text`` under ``policy`` and return a :class:`ChunkResult`.
 
-        ``config`` accepts a :class:`FlatConfig`/:class:`HierarchicalConfig`
-        or their serialized dict form; a ``"provider"`` key in the dict (or
-        the ``provider`` kwarg) overrides the engine-level provider for this
-        call only.
+        Validation, compilation, provider checks and context resolution all
+        finish before any chunking starts.
         """
-        call_provider = provider if provider is not None else self._provider
-        if isinstance(config, Mapping):
-            raw = dict(config)
-            dict_provider = raw.pop("provider", None)
-            if dict_provider is not None:
-                call_provider = dict_provider
-            cfg = engine_config_from_dict(raw)
-        elif isinstance(config, FlatConfig | HierarchicalConfig):
-            cfg = config
-        else:
-            raise ConfigError(
-                "config", f"expected a config dict or config object, got {config!r}"
-            )
+        start = time.perf_counter()
+        self._require_policy(policy)
+        if not isinstance(text, str):
+            raise TypeError(f"text must be a str, got {type(text).__name__}")
+        plan = compile_policy(policy, self.registry)
 
-        # Flat is the single-level special case without organization fields.
-        levels: list[LevelConfig]
-        write_organization: bool
-        if isinstance(cfg, FlatConfig):
-            levels = [LevelConfig(strategy=cfg.strategy, config=cfg.config)]
-            write_organization = False
-        else:
-            levels = list(cfg.levels)
-            write_organization = True
+        for level in plan.levels:
+            if level.requires_provider and provider is None:
+                raise ProviderMissingError(level.strategy)
 
-        chunkers = [self.registry.create(lv.strategy, lv.config) for lv in levels]
-        for chunker in chunkers:
-            if call_provider is not None and isinstance(chunker, ProviderAware):
-                chunker.set_provider(call_provider)
+        field_values = resolve_fields(plan, context)
 
-        chunks = organization.run(
-            text,
-            chunkers,
-            cfg.custom,
-            [dict(lv.metadata) for lv in levels],
-            write_organization=write_organization,
+        chunkers: list[Chunker] = []
+        for level in plan.levels:
+            spec = self.registry.get(level.strategy)
+            params = spec.params_model.model_validate(level.params)
+            chunkers.append(spec.factory(params, provider))
+
+        chunks = organization.run(text, plan, chunkers, field_values)
+
+        from . import __version__
+
+        return ChunkResult(
+            chunks=chunks,
+            policy_id=plan.policy_id,
+            policy_version=plan.policy_version,
+            policy_hash=plan.policy_hash,
+            execution_id=str(uuid.uuid4()),
+            engine_version=__version__,
+            execution_time_ms=(time.perf_counter() - start) * 1000.0,
         )
-        return ChunkResult(chunks)

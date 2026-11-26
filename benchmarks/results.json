@@ -12,25 +12,25 @@
     "paragraphs": 40
   },
   "results": {
-    "flat_sliding_window": {
+    "single_level_sliding_window": {
       "chunks_produced": 24,
-      "best_seconds": 5.4e-05,
-      "median_seconds": 6.6e-05
+      "best_seconds": 0.000368,
+      "median_seconds": 0.000365
     },
-    "flat_recursive": {
+    "single_level_recursive": {
       "chunks_produced": 32,
-      "best_seconds": 0.000123,
-      "median_seconds": 0.000127
+      "best_seconds": 0.000522,
+      "median_seconds": 0.000645
     },
-    "flat_semantic": {
+    "single_level_semantic": {
       "chunks_produced": 79,
-      "best_seconds": 0.001048,
-      "median_seconds": 0.000982
+      "best_seconds": 0.001907,
+      "median_seconds": 0.002311
     },
-    "hierarchical_rec_sw": {
+    "two_level_recursive_sliding": {
       "chunks_produced": 72,
-      "best_seconds": 0.000421,
-      "median_seconds": 0.000357
+      "best_seconds": 0.001137,
+      "median_seconds": 0.001118
     }
   }
 }

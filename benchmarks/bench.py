@@ -2,6 +2,10 @@
 
 Runs each workload with a fixed seed and reports environment, parameters and
 timing as JSON to stdout. Usage: ``python benchmarks/bench.py [out.json]``
+
+Note: workload keys were renamed ``flat_*``/``hierarchical_*`` to
+``single_level_*``/``two_level_*`` when the engine API changed; seed, input
+and per-workload parameters are unchanged.
 """
 
 import json
@@ -11,7 +15,7 @@ import statistics
 import sys
 import timeit
 
-from chunkweave import ChunkEngine
+from chunkweave import ChunkEngine, Policy
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -58,46 +62,83 @@ def timed(fn) -> dict:
     }
 
 
+def _policy(levels: list[dict], policy_id: str) -> Policy:
+    return Policy.model_validate(
+        {
+            "api_version": "chunkweave/v1",
+            "policy": {"id": policy_id, "name": policy_id, "version": "1.0.0"},
+            "pipeline": {"levels": levels},
+        }
+    )
+
+
 def main() -> None:
     rng = random.Random(SEED)
     text = build_text(rng, paragraphs=40, words_per_paragraph=12)
     engine = ChunkEngine()
-    engine.set_provider(BenchProvider())
+    provider = BenchProvider()
 
     workloads = {
-        "flat_sliding_window": lambda: engine.chunk(
+        "single_level_sliding_window": lambda: engine.execute(
             text,
-            {
-                "organization": "flat",
-                "strategy": "sliding_window",
-                "config": {"chunk_size": 500, "overlap": 50},
-            },
-        ),
-        "flat_recursive": lambda: engine.chunk(
-            text,
-            {
-                "organization": "flat",
-                "strategy": "recursive",
-                "config": {"chunk_size": 500},
-            },
-        ),
-        "flat_semantic": lambda: engine.chunk(
-            text,
-            {
-                "organization": "flat",
-                "strategy": "semantic",
-                "config": {"threshold": 0.6, "chunk_size": 500},
-            },
-        ),
-        "hierarchical_rec_sw": lambda: engine.chunk(
-            text,
-            {
-                "organization": "hierarchical",
-                "levels": [
-                    {"strategy": "recursive", "config": {"chunk_size": 800}},
-                    {"strategy": "sliding_window", "config": {"chunk_size": 200}},
+            _policy(
+                [
+                    {
+                        "name": "l0",
+                        "strategy": "sliding_window",
+                        "params": {"chunk_size": 500, "overlap": 50},
+                    }
                 ],
-            },
+                "bench-sliding",
+            ),
+            provider=provider,
+        ),
+        "single_level_recursive": lambda: engine.execute(
+            text,
+            _policy(
+                [
+                    {
+                        "name": "l0",
+                        "strategy": "recursive",
+                        "params": {"chunk_size": 500},
+                    }
+                ],
+                "bench-recursive",
+            ),
+            provider=provider,
+        ),
+        "single_level_semantic": lambda: engine.execute(
+            text,
+            _policy(
+                [
+                    {
+                        "name": "l0",
+                        "strategy": "semantic",
+                        "params": {"threshold": 0.6, "chunk_size": 500},
+                    }
+                ],
+                "bench-semantic",
+            ),
+            provider=provider,
+        ),
+        "two_level_recursive_sliding": lambda: engine.execute(
+            text,
+            _policy(
+                [
+                    {
+                        "name": "l0",
+                        "strategy": "recursive",
+                        "params": {"chunk_size": 800},
+                    },
+                    {
+                        "name": "l1",
+                        "strategy": "sliding_window",
+                        "params": {"chunk_size": 200},
+                    }
+                ],
+                "bench-two-level",
+            ),
+            provider=provider,
         ),
     }
     report = {

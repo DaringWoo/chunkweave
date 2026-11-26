@@ -1,134 +1,83 @@
-"""Custom metadata rules: reserved fields, conflict detection, assembly.
+"""Metadata Builder: resolve declared fields and assemble ``metadata``.
 
-Common metadata lives on :class:`Chunk` itself; organization fields are
-written by the organization executor; strategy metadata comes from the
-strategy; custom metadata is merged here from the engine-level ``custom``
-plus each level's ``metadata`` (nearest level wins, deep-copied per chunk).
+Business ``metadata`` holds exactly the fields declared by the Policy's
+``metadata.fields`` (fixed ``value`` or ``source`` context path) plus the
+reserved keys copied in by the include options. Every chunk gets an
+independent deep copy.
 """
 
 from __future__ import annotations
 
 import copy
 import json
-from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import replace
+from collections.abc import Mapping
 from typing import Any
 
-from .models import (
-    COMMON_FIELD_NAMES,
-    ORGANIZATION_FIELD_NAMES,
-    Chunk,
-    ChunkMetadata,
-    ConfigError,
-    MetadataConflictError,
-)
+from .compiler import ExecutionPlan
+from .models import ContextResolutionError
 
 
-def reserved_field_names(strategy_keys: Iterable[str] = ()) -> frozenset[str]:
-    """Reserved metadata fields: common + organization + strategy-declared keys."""
-    return COMMON_FIELD_NAMES | ORGANIZATION_FIELD_NAMES | frozenset(strategy_keys)
-
-
-def _check_json_serializable(custom: Mapping[str, Any]) -> None:
-    for key, value in custom.items():
-        try:
-            json.dumps(value)
-        except (TypeError, ValueError) as exc:
-            raise ConfigError(
-                str(key), f"custom metadata value is not JSON serializable: {exc}"
-            ) from exc
-
-
-def validate_custom_metadata(
-    custom: Mapping[str, Any], reserved: Iterable[str] = ()
-) -> frozenset[str]:
-    """Validate custom metadata keys and values.
-
-    Returns the set of custom keys. Raises :class:`MetadataConflictError` when
-    a key collides with a reserved field and :class:`ConfigError` when a value
-    is not JSON serializable.
-    """
-    reserved_set = reserved_field_names(reserved)
-    conflicts = set(custom) & reserved_set
-    if conflicts:
-        raise MetadataConflictError(conflicts)
-    _check_json_serializable(custom)
-    return frozenset(custom)
-
-
-def attach_custom_metadata(
-    chunks: Iterable[Chunk],
-    custom: Mapping[str, Any] | None,
-    strategy_keys: Iterable[str] = (),
-) -> list[Chunk]:
-    """Return a new list of chunks with ``custom`` merged into each custom group.
-
-    Keys are validated against reserved fields (common + organization +
-    ``strategy_keys``) before any chunk is produced. Every chunk receives an
-    independent deep copy, and incoming custom values override existing custom
-    keys on a chunk (nearest-source-wins ordering is the caller's
-    responsibility). The input list and chunks are left unmodified.
-    """
-    if not custom:
-        return list(chunks)
-    validate_custom_metadata(custom, strategy_keys)
-    out: list[Chunk] = []
-    for chunk in chunks:
-        merged_custom = copy.deepcopy(chunk.metadata.custom)
-        merged_custom.update(copy.deepcopy(dict(custom)))
-        new_meta = ChunkMetadata(
-            organization=dict(chunk.metadata.organization),
-            strategy=dict(chunk.metadata.strategy),
-            custom=merged_custom,
-        )
-        out.append(replace(chunk, metadata=new_meta))
-    return out
-
-
-def custom_for_level(
-    engine_custom: Mapping[str, Any],
-    level_metadata: Sequence[Mapping[str, Any]],
-    level: int,
+def resolve_fields(
+    plan: ExecutionPlan, context: Mapping[str, Any] | None
 ) -> dict[str, Any]:
-    """Custom metadata for chunks produced at ``level``.
+    """Resolve every declared metadata field once, before any chunking.
 
-    Engine-level ``custom`` propagates to every descendant; each level's
-    ``metadata`` applies to its own chunks and is inherited by descendants,
-    nearer levels overriding on key conflicts.
+    ``value`` fields take their declared constant; ``source`` fields walk
+    the field's ``path`` segments inside ``context``. Keys in ``context``
+    that no field references are never read.
     """
-    merged = dict(engine_custom)
-    for i in range(level + 1):
-        merged.update(level_metadata[i])
-    return merged
+    values: dict[str, Any] = {}
+    for field in plan.metadata_fields:
+        dotted = "context." + ".".join(field.path)
+        if field.kind == "value":
+            values[field.name] = field.value
+            continue
+        if context is None:
+            raise ContextResolutionError(field.name, dotted, "no context provided")
+        node: Any = context
+        for depth, segment in enumerate(field.path):
+            if not isinstance(node, Mapping):
+                walked = ".".join(field.path[:depth])
+                raise ContextResolutionError(
+                    field.name,
+                    dotted,
+                    f"context{'.' + walked if walked else ''} is not a mapping",
+                )
+            if segment not in node:
+                walked = ".".join(field.path[: depth + 1])
+                raise ContextResolutionError(
+                    field.name, dotted, f"missing key 'context.{walked}'"
+                )
+            node = node[segment]
+        try:
+            json.dumps(node)
+        except (TypeError, ValueError) as e:
+            raise ContextResolutionError(
+                field.name, dotted, "value is not JSON-serializable"
+            ) from e
+        values[field.name] = node
+    return values
 
 
-def validate_custom_across_levels(
-    engine_custom: Mapping[str, Any],
-    level_metadata: Sequence[Mapping[str, Any]],
-    strategy_keys_per_level: Sequence[frozenset[str]],
-) -> None:
-    """Config-time reserved-field validation for every level.
-
-    The custom keys landing on a level's chunks are the engine custom plus
-    the metadata of every level up to and including it; each such merged key
-    set must not collide with that level's reserved fields (common +
-    organization + its strategy's ``metadata_keys``).
-    """
-    accumulated: dict[str, Any] = dict(engine_custom)
-    for meta, keys in zip(level_metadata, strategy_keys_per_level, strict=True):
-        accumulated.update(meta)
-        conflicts = set(accumulated) & reserved_field_names(keys)
-        if conflicts:
-            raise MetadataConflictError(conflicts)
-
-
-def attach_level_custom(
-    chunks: list[Chunk],
-    engine_custom: Mapping[str, Any],
-    level_metadata: Sequence[Mapping[str, Any]],
+def build_metadata(
+    field_values: Mapping[str, Any],
+    plan: ExecutionPlan,
+    *,
+    parent_id: str | None,
     level: int,
-    strategy_keys: frozenset[str],
-) -> list[Chunk]:
-    """Attach the merged custom metadata for ``level`` to ``chunks``."""
-    custom = custom_for_level(engine_custom, level_metadata, level)
-    return attach_custom_metadata(chunks, custom, strategy_keys)
+    sequence: int,
+    level_name: str,
+    strategy: str,
+    strategy_metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Assemble one chunk's ``metadata`` dict (an independent deep copy)."""
+    metadata = copy.deepcopy(dict(field_values))
+    if plan.include_organization:
+        metadata["parent_id"] = parent_id
+        metadata["level"] = level
+        metadata["sequence"] = sequence
+        metadata["level_name"] = level_name
+    if plan.include_strategy:
+        metadata["strategy"] = strategy
+        metadata["strategy_metadata"] = copy.deepcopy(dict(strategy_metadata))
+    return metadata

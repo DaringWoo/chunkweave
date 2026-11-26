@@ -1,0 +1,25 @@
+api_version: chunkweave/v1
+policy:
+  id: three-level-mixed
+  name: 三层混合策略
+  version: 1.0.0
+pipeline:
+  levels:
+    - name: segment
+      strategy: recursive
+      params:
+        chunk_size: 40
+        separators: ["。"]
+    - name: topic
+      strategy: semantic
+      params:
+        threshold: 0.5
+        chunk_size: 30
+        unit_separators: ["。"]
+    - name: detail
+      strategy: sliding_window
+      params:
+        chunk_size: 10
+metadata:
+  fields:
+    doc_kind: {value: mixed}

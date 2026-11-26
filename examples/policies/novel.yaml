@@ -1,0 +1,16 @@
+api_version: chunkweave/v1
+policy:
+  id: novel-paragraphs
+  name: 小说段落切分
+  version: 1.0.0
+pipeline:
+  levels:
+    - name: paragraph
+      strategy: recursive
+      params:
+        chunk_size: 40
+        separators: ["\n\n", "\n", "。", "，", ""]
+metadata:
+  fields:
+    doc_kind: {value: novel}
+    chapter_title: {source: context.chapter.title}

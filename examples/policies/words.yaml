@@ -1,0 +1,18 @@
+api_version: chunkweave/v1
+policy:
+  id: custom-words
+  name: 自定义分词策略
+  version: 1.0.0
+pipeline:
+  levels:
+    - name: words
+      strategy: words
+      params:
+        max_words: 3
+    - name: window
+      strategy: sliding_window
+      params:
+        chunk_size: 8
+metadata:
+  fields:
+    doc_kind: {value: custom}

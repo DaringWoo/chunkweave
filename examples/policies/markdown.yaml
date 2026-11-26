@@ -1,0 +1,21 @@
+api_version: chunkweave/v1
+policy:
+  id: markdown-sections
+  name: Markdown 章节切分
+  version: 1.0.0
+pipeline:
+  levels:
+    - name: section
+      strategy: recursive
+      params:
+        chunk_size: 200
+        separators: [{value: "^#{1,6} ", regex: true}]
+        keep_separator: next
+    - name: window
+      strategy: sliding_window
+      params:
+        chunk_size: 25
+        overlap: 5
+metadata:
+  fields:
+    doc_kind: {value: markdown}

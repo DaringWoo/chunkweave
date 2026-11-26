@@ -148,6 +148,14 @@ Semantic Provider 通过 `execute(provider=...)` 按次注入，不写入 Policy
 - [分隔符声明形式 `SeparatorSpec`] → `params` 保存可 JSON 序列化的声明形式（字面量字符串或 `{value, regex}` 映射），Chunker 构造时才编译为 `re.Pattern`；`regex: true` 的 pattern 在参数校验阶段必须能编译。
 - [参数与 Policy 字段严格类型] → 整数字段拒绝 bool/字符串/float（`StrictInt`），`threshold` 拒绝 bool 与字符串、存为 float，`version` 拒绝 YAML 解析出的 `1.0` 浮点（`StrictStr` + `MAJOR.MINOR.PATCH` 正则）。
 - [`MetadataFieldConfig` 只序列化声明的来源键] → 以 `model_fields_set` 判定 `value`/`source` 恰好声明一个，自定义序列化只输出该键；`{"value": null}` 与 `{"source": ...}` 可区分且 `model_dump()` 往返不漂移（Policy Hash 依赖这一点）。
+- [入口参数类型检查] → `execute`/`compile`/`validate` 对非 `Policy` 实例（dict、YAML 字符串、路径）抛 `TypeError` 并提示用 `Policy.from_file`/`from_yaml` 加载；`execute` 对非 `str` 的 `text` 同样抛 `TypeError`。
+- [`validate` 返回 None] → 只做编译与语义校验，不切块、不产 IR 给调用方；校验失败照常抛 `PolicyValidationError`。
+- [`execution_id` 为 uuid4 字符串] → 每次 `execute` 生成 `str(uuid.uuid4())`。
+- [`requires_provider` 记录在 IR] → `PlanLevel.requires_provider` 是布尔声明，不是 Provider 实例；IR `model_dump_json()` 完全可序列化，Provider 只在 `execute` 调用边界注入。
+- [Context 在切块前解析] → `resolve_fields` 先于任何 Chunker 调用执行，空文本也照样解析，失败抛 `ContextResolutionError` 且不产出部分结果。
+- [丢弃空 span] → Runtime 丢弃 `content` 为空的 `ChunkSpan`，编号只计保留的 span；某父块无子块时该分支终止。
+- [排序由 Runtime 完成] → `organization.run` 末尾按 `(start_offset, level)` 稳定排序；`ChunkResult` 模型本身不排序。
+- [`engine_version` 来源] → 函数内 `from . import __version__` 取得，避免循环导入，版本号不在第二处硬编码。
 
 ## Risks / Trade-offs
 

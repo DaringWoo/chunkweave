@@ -1,11 +1,12 @@
-"""Organization execution: N-level top-down descent.
+"""Runtime organization: N-level top-down descent over the ExecutionPlan.
 
-Flat is the single-level special case: one chunker, no organization fields
-written. Hierarchical runs N levels; every chunk of level *i* is
-independently chunked by the chunker of level *i+1*, parent results are
-never merged before re-chunking, and local offsets become global by adding
-the parent's ``start_offset``. A parent producing no children simply ends
-that branch. ``chunk_id`` values are renumbered in breadth-first order.
+A single level is flat output; N levels descend parent by parent: every
+chunk of level *i* is independently chunked by the level *i+1* chunker,
+parent results are never merged before re-chunking, and span offsets become
+global by adding the parent's ``start_offset``. Empty spans are dropped
+before ``chunk_id``/``sequence`` numbering; a parent producing no children
+simply ends that branch. ``chunk_id`` values are numbered in breadth-first
+order.
 """
 
 from __future__ import annotations
@@ -14,74 +15,68 @@ import itertools
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .metadata import attach_level_custom, validate_custom_across_levels
-from .models import Chunk, ChunkMetadata, chunk_id_for
-from .strategies import LegacyChunker
+from .compiler import ExecutionPlan
+from .metadata import build_metadata
+from .models import Chunk, ChunkSpan, chunk_id_for
+from .strategies import Chunker
 
 
 def run(
     text: str,
-    chunkers: Sequence[LegacyChunker],
-    engine_custom: Mapping[str, Any],
-    level_metadata: Sequence[Mapping[str, Any]],
-    *,
-    write_organization: bool,
+    plan: ExecutionPlan,
+    chunkers: Sequence[Chunker],
+    field_values: Mapping[str, Any],
 ) -> list[Chunk]:
-    """Execute the per-level descent over ``text``.
-
-    ``chunkers`` holds one prepared chunker per level; ``level_metadata``
-    carries each level's ``metadata`` mapping. With ``write_organization``
-    off, chunks keep an empty ``organization`` group (flat); with it on,
-    ``parent_id``/``level``/``sequence`` are written (hierarchical).
-    """
+    """Execute the per-level descent over ``text`` and return sorted chunks."""
     if not text:
         return []
-    strategy_keys = [c.metadata_keys for c in chunkers]
-    # Config-time rejection: validate before any chunking runs.
-    validate_custom_across_levels(engine_custom, level_metadata, strategy_keys)
 
     counter = itertools.count()
     result: list[Chunk] = []
 
-    def adopt(chunk: Chunk, level: int, parent_id: str | None, seq: int) -> Chunk:
-        organization = (
-            {"parent_id": parent_id, "level": level, "sequence": seq}
-            if write_organization
-            else {}
-        )
+    def make_chunk(
+        span: ChunkSpan, level: int, parent_id: str | None, seq: int, base: int
+    ) -> Chunk:
+        plan_level = plan.levels[level]
         return Chunk(
             chunk_id=chunk_id_for(next(counter)),
-            content=chunk.content,
-            start_offset=chunk.start_offset,
-            end_offset=chunk.end_offset,
-            metadata=ChunkMetadata(
-                organization=organization,
-                strategy=dict(chunk.metadata.strategy),
+            content=span.content,
+            parent_id=parent_id,
+            level=level,
+            sequence=seq,
+            start_offset=base + span.start_offset,
+            end_offset=base + span.end_offset,
+            strategy=plan_level.strategy,
+            strategy_metadata=dict(span.strategy_metadata),
+            metadata=build_metadata(
+                field_values,
+                plan,
+                parent_id=parent_id,
+                level=level,
+                sequence=seq,
+                level_name=plan_level.name,
+                strategy=plan_level.strategy,
+                strategy_metadata=span.strategy_metadata,
             ),
         )
 
     frontier: list[Chunk] = []
-    for seq, chunk in enumerate(chunkers[0].chunk(text)):
-        frontier.append(adopt(chunk, 0, None, seq))
-    result.extend(
-        attach_level_custom(frontier, engine_custom, level_metadata, 0, strategy_keys[0])
-    )
-    frontier = result[: len(frontier)]
+    for seq, span in enumerate(s for s in chunkers[0].chunk(text) if s.content):
+        frontier.append(make_chunk(span, 0, None, seq, 0))
+    result.extend(frontier)
 
     for level in range(1, len(chunkers)):
         next_frontier: list[Chunk] = []
         for parent in frontier:
-            for seq, child in enumerate(chunkers[level].chunk(parent.content)):
-                adopted = adopt(child, level, parent.chunk_id, seq)
-                # Local -> global offset conversion.
-                adopted.start_offset += parent.start_offset
-                adopted.end_offset += parent.start_offset
-                next_frontier.append(adopted)
-        attached = attach_level_custom(
-            next_frontier, engine_custom, level_metadata, level, strategy_keys[level]
-        )
-        result.extend(attached)
-        frontier = attached
+            children = [
+                s for s in chunkers[level].chunk(parent.content) if s.content
+            ]
+            for seq, span in enumerate(children):
+                next_frontier.append(
+                    make_chunk(span, level, parent.chunk_id, seq, parent.start_offset)
+                )
+        result.extend(next_frontier)
+        frontier = next_frontier
         if not frontier:
             break
-    return result
+    return sorted(result, key=lambda c: (c.start_offset, c.level))
