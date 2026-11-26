@@ -197,7 +197,7 @@ result2 = ChunkResult.model_validate(data)  # round-trip
 | `docs/http-service.md` | optional HTTP API (`chunkweave[server]`) |
 | `docs/decisions/` | ADRs |
 | `docs/migration.md` | old API → new API migration guide |
-| `examples/` | 7 runnable scripts + `examples/policies/*.yaml` |
+| `examples/` | 11 runnable scripts + `examples/policies/*.yaml` |
 | `IMPLEMENTATION_REPORT.md` | build/verification report |
 
 ## Develop

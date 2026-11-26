@@ -21,7 +21,7 @@ chunkweave/
 │   ├── engine.py               # Registry/StrategySpec + ChunkEngine
 │   └── server.py               # optional HTTP service (create_app, POST /api/v1/chunks)
 ├── tests/                      # 13 test files, 304 tests
-├── examples/                   # 7 runnable examples + policies/*.yaml
+├── examples/                   # 11 runnable examples + policies/*.yaml
 ├── benchmarks/                 # bench.py + fingerprint.py + results.json
 ├── docs/                       # design, configuration, metadata, migration,
 │   ├── algorithms/             #   sliding-window, recursive, semantic
@@ -72,7 +72,7 @@ copies plus include-gated reserved-key copies. Policy Hash =
 | `pytest -q` | **304 passed** in ~1.1 s |
 | `ruff check .` | **All checks passed** |
 | `mypy src` | **Success: no issues found in 9 source files** |
-| `examples/*.py` | **7/7 run OK** |
+| `examples/*.py` | **11/11 run OK** |
 | `benchmarks/fingerprint.py` | digest `d2604841…b3422`, counts 9/12/21/24 |
 | `python -m build --no-isolation` | wheel + sdist built |
 | `twine check` | PASSED (see §6) |
