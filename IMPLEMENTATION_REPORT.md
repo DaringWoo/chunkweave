@@ -1,6 +1,7 @@
 # Implementation Report — chunkweave 0.1.0（Policy 驱动架构）
 
-All numbers below come from actual runs on 2026-11-26 (Python 3.13.16,
+All numbers below come from actual runs on 2026-11-26; the HTTP
+service section and its test counts from 2026-11-27 (Python 3.13.16,
 Windows-10-10.0.19045-SP0, Intel64 Family 6 Model 158 Stepping 10).
 
 ## 1. Directory layout
@@ -9,30 +10,33 @@ Windows-10-10.0.19045-SP0, Intel64 Family 6 Model 158 Stepping 10).
 chunkweave/
 ├── pyproject.toml              # hatchling, requires-python >=3.11, MIT
 ├── LICENSE / README.md
-├── src/chunkweave/             # 8 modules, flat layout
+├── src/chunkweave/             # 9 modules, flat layout
 │   ├── __init__.py             # public exports + __version__
 │   ├── models.py               # exceptions, ChunkSpan, Chunk, ChunkResult
 │   ├── strategies.py           # protocols, params models, 3 chunkers
-│   ├── policy.py               # Policy model + YAML safe loading
+│   ├── policy.py               # Policy model + YAML/dict loading
 │   ├── compiler.py             # ExecutionPlan IR + policy_hash
 │   ├── metadata.py             # Metadata Builder (resolve + build)
 │   ├── organization.py         # Runtime: per-parent descent, ordering
-│   └── engine.py               # Registry/StrategySpec + ChunkEngine
-├── tests/                      # 12 test files, 275 tests
+│   ├── engine.py               # Registry/StrategySpec + ChunkEngine
+│   └── server.py               # optional HTTP service (create_app, POST /api/v1/chunks)
+├── tests/                      # 13 test files, 304 tests
 ├── examples/                   # 7 runnable examples + policies/*.yaml
 ├── benchmarks/                 # bench.py + fingerprint.py + results.json
 ├── docs/                       # design, configuration, metadata, migration,
 │   ├── algorithms/             #   sliding-window, recursive, semantic
 │   ├── organization/           #   pipeline-levels.md
-│   └── decisions/              #   11 ADRs (0004–0006 superseded/partial)
+│   ├── http-service.md         #   HTTP API reference (optional extra)
+│   └── decisions/              #   12 ADRs (0004–0006 superseded/partial)
 ├── .github/workflows/ci.yml
 └── openspec/                   # change management
 ```
 
 ## 2. Public API
 
-- `Policy.from_file(path)` / `Policy.from_yaml(text)` — safe YAML loading,
-  strict unknown-field rejection, `PolicyLoadError`/`PolicyValidationError`.
+- `Policy.from_file(path)` / `Policy.from_yaml(text)` /
+  `Policy.from_dict(data)` — safe loading, strict unknown-field
+  rejection, `PolicyLoadError`/`PolicyValidationError`.
 - `ChunkEngine()` — `validate(policy)`, `compile(policy) -> ExecutionPlan`,
   `execute(text, policy, context=None, provider=None) -> ChunkResult`,
   `register(name, factory, *, params_model, requires_provider=False,
@@ -65,9 +69,9 @@ copies plus include-gated reserved-key copies. Policy Hash =
 
 | Check | Result |
 | --- | --- |
-| `pytest -q` | **275 passed** in ~0.7 s |
+| `pytest -q` | **304 passed** in ~1.1 s |
 | `ruff check .` | **All checks passed** |
-| `mypy src` | **Success: no issues found in 8 source files** |
+| `mypy src` | **Success: no issues found in 9 source files** |
 | `examples/*.py` | **7/7 run OK** |
 | `benchmarks/fingerprint.py` | digest `d2604841…b3422`, counts 9/12/21/24 |
 | `python -m build --no-isolation` | wheel + sdist built |
@@ -110,8 +114,12 @@ across all workloads; old values from the committed
 - **Q8 (semantic model identity) not implemented** — the Provider
   protocol has no channel for model id/version/params; deferred to a
   future change.
-- **HTTP Service not implemented** — `POST /api/v1/chunks` and policy
-  governance are deferred per the change's workflow follow-up.
+- **HTTP Service** — implemented as the optional `chunkweave[server]`
+  extra (`src/chunkweave/server.py` → `create_app`,
+  `POST /api/v1/chunks`); 25 tests in `tests/test_server.py` cover
+  SDK-equivalence, request validation, error mapping (422/413/500)
+  and internal-error redaction. `policy_ref`, authentication, policy
+  management and streaming remain out of scope.
 - **Isolated build depends on the local pip mirror** — the configured
   index lacks `hatchling`; `python -m build` only works with
   `--no-isolation` (or a full pypi.org index).

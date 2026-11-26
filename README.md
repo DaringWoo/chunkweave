@@ -141,6 +141,42 @@ engine.register(
 The strategy is then referenced by name in `pipeline.levels[].strategy`;
 its `params` are validated against `params_model`, rejecting undefined keys.
 
+## HTTP service (optional)
+
+An opt-in HTTP API exposes `POST /api/v1/chunks` with the same execution
+path and result as the SDK:
+
+```bash
+pip install 'chunkweave[server]'
+uvicorn --factory chunkweave.server:create_app --port 8000
+```
+
+```bash
+curl -s -X POST http://localhost:8000/api/v1/chunks \
+  -H 'Content-Type: application/json' \
+  -d '{"text": "some text",
+       "policy": {"api_version": "chunkweave/v1",
+                  "policy": {"id": "demo", "name": "demo", "version": "1.0.0"},
+                  "pipeline": {"levels": [
+                    {"name": "l0", "strategy": "sliding_window",
+                     "params": {"chunk_size": 10}}]}}}'
+```
+
+To inject a provider or pre-registered custom chunkers, create the app in
+your own entry point:
+
+```python
+# serve.py
+from chunkweave import ChunkEngine
+from chunkweave.server import create_app
+
+app = create_app(engine=ChunkEngine(), provider=MyProvider(),
+                 max_text_length=1_000_000)
+```
+
+See `docs/http-service.md` for the request/response contract, error table
+and `create_app` parameters.
+
 ## Serialization
 
 ```python
@@ -158,6 +194,7 @@ result2 = ChunkResult.model_validate(data)  # round-trip
 | `docs/organization/pipeline-levels.md` | 1/N-level execution rules |
 | `docs/algorithms/` | sliding-window, recursive, semantic |
 | `docs/design.md` | architecture: Policy → Compiler → IR → Runtime |
+| `docs/http-service.md` | optional HTTP API (`chunkweave[server]`) |
 | `docs/decisions/` | ADRs |
 | `docs/migration.md` | old API → new API migration guide |
 | `examples/` | 7 runnable scripts + `examples/policies/*.yaml` |

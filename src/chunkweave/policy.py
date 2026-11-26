@@ -223,9 +223,19 @@ class Policy(BaseModel):
                 f" at line {mark.line + 1}, column {mark.column + 1}" if mark else ""
             )
             raise PolicyLoadError(f"cannot parse policy YAML{where}: {e}") from e
+        return cls.from_dict(data)
+
+    @classmethod
+    def from_dict(cls, data: Any) -> Policy:
+        """Build a Policy from its mapping form (e.g. parsed JSON/YAML).
+
+        A non-mapping ``data`` raises :class:`PolicyLoadError`; structural
+        and semantic violations raise :class:`PolicyValidationError` with a
+        field path, identical to :meth:`from_yaml`.
+        """
         if not isinstance(data, dict):
             raise PolicyLoadError(
-                f"policy root must be a mapping, got {type(data).__name__}"
+                f"policy must be a mapping, got {type(data).__name__}"
             )
         try:
             return cls.model_validate(data)

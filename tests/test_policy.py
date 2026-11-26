@@ -456,3 +456,59 @@ pipeline:
     p2 = Policy.model_validate(dumped)
     assert p2.pipeline.levels[0].params == p.pipeline.levels[0].params
     assert p2.model_dump() == dumped
+
+
+def test_from_dict_valid_mapping():
+    data = {
+        "api_version": "chunkweave/v1",
+        "policy": {"id": "d1", "name": "dict", "version": "1.0.0"},
+        "pipeline": {
+            "levels": [
+                {"name": "l0", "strategy": "recursive", "params": {"chunk_size": 40}}
+            ]
+        },
+        "metadata": {"fields": {"kind": {"value": "x"}}},
+    }
+    p = Policy.from_dict(data)
+    assert p.id == "d1"
+    assert p.pipeline.levels[0].strategy == "recursive"
+    assert p.metadata.fields["kind"].value == "x"
+
+
+def test_from_dict_matches_from_yaml():
+    doc = """\
+api_version: chunkweave/v1
+policy: {id: same, name: same, version: 1.0.0}
+pipeline:
+  levels:
+    - name: l0
+      strategy: sliding_window
+      params: {chunk_size: 10, overlap: 2}
+metadata:
+  fields:
+    a: {source: context.a.b}
+"""
+    import yaml
+
+    p_yaml = Policy.from_yaml(doc)
+    p_dict = Policy.from_dict(yaml.safe_load(doc))
+    assert p_dict.model_dump() == p_yaml.model_dump()
+
+
+def test_from_dict_unknown_field_path():
+    data = {
+        "api_version": "chunkweave/v1",
+        "policy": {"id": "d1", "name": "d", "version": "1.0.0"},
+        "pipeline": {
+            "levels": [{"name": "l0", "strategy": "recursive", "bogus": 1}]
+        },
+    }
+    with pytest.raises(PolicyValidationError) as ei:
+        Policy.from_dict(data)
+    assert ei.value.path == "pipeline.levels[0].bogus"
+
+
+def test_from_dict_not_mapping():
+    for bad in ([1, 2], "str", 42, None):
+        with pytest.raises(PolicyLoadError):
+            Policy.from_dict(bad)
