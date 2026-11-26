@@ -4,12 +4,12 @@ Fixed-size windows that advance by `chunk_size - overlap` code points.
 `overlap = 0` is fixed-size chunking — there is no separate FixedSize
 algorithm.
 
-```python
-engine.chunk(text, {
-    "organization": "flat",
-    "strategy": "sliding_window",
-    "config": {"chunk_size": 100, "overlap": 20},
-})
+```yaml
+pipeline:
+  levels:
+    - name: window
+      strategy: sliding_window
+      params: {chunk_size: 100, overlap: 20}
 ```
 
 ## Parameters
@@ -26,8 +26,8 @@ engine.chunk(text, {
 - Every window advances — no infinite loops, even at `overlap = chunk_size - 1`
   (step 1).
 - Empty text yields an empty result.
-- Strategy metadata: `window_index` (0-based) and `overlap_size` (0 on the
-  first window, equal to `overlap` on the rest).
+- `strategy_metadata` keys: `window_index` (0-based) and `overlap_size`
+  (0 on the first window, equal to `overlap` on the rest).
 
 ## Example
 
@@ -40,4 +40,4 @@ chunk-0002 [4,8) "efgh"  window_index=2 overlap_size=2
 chunk-0003 [6,8) "gh"    window_index=3 overlap_size=2
 ```
 
-See `examples/flat_sliding_window.py`.
+See `examples/single_level_sliding_window.py`.

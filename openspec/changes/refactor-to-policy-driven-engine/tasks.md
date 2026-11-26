@@ -59,9 +59,9 @@
 - [x] 9.1 为每份 delta 中的全部 Scenario 建立对应测试，含安全解析拒绝不安全标签、保留键拒绝（含 include 全关）、include 复制语义、`requires_provider` 提前报错；验收：`openspec show refactor-to-policy-driven-engine --json --deltas-only` 的每个 Scenario 可映射到至少一个 pytest 用例，`pytest` 全绿
 - [x] 9.2 迁移或删除绑定旧 API 的测试：`tests/test_flat.py`、`test_hierarchical.py`、`test_assembly.py`、`test_metadata.py`、`test_config.py`、`test_engine.py`；算法相关测试（`test_sliding_window`、`test_recursive`、`test_semantic`、`test_chunk`、`test_registry`、`test_errors`）改写到新接口，断言不得放宽；验收：`pytest` 全绿且无绑定旧 API 的测试残留
 - [x] 9.3 移植 `benchmarks/bench.py`、`benchmarks/fingerprint.py` 到新 API；验收：`package-distribution`「可重复 Benchmark」满足
-- [ ] 9.4 更新文档：`README.md`、`docs/configuration.md`（Policy DSL 参考，提醒 YAML 隐式类型坑）、`docs/metadata.md`、`docs/organization/flat.md` 与 `hierarchical.md` 合并为一份多层组织文档；新增 ADR 标明替代 `0005-custom-inheritance` 与 `0006-flat-vs-hierarchical`，另新增 Policy DSL、Policy Hash、未知字段严格拒绝、include 语义的 ADR；写旧 API 迁移说明（对应 design 的映射表）；验收：`package-distribution`「文档可用性」Scenario 满足
+- [x] 9.4 更新文档：`README.md`、`docs/configuration.md`（Policy DSL 参考，提醒 YAML 隐式类型坑）、`docs/metadata.md`、`docs/organization/flat.md` 与 `hierarchical.md` 合并为一份多层组织文档；新增 ADR 标明替代 `0005-custom-inheritance` 与 `0006-flat-vs-hierarchical`，另新增 Policy DSL、Policy Hash、未知字段严格拒绝、include 语义的 ADR；写旧 API 迁移说明（对应 design 的映射表）；验收：`package-distribution`「文档可用性」Scenario 满足
 - [x] 9.5 新建 `examples/policies/`（至少含 `novel.yaml`、`markdown.yaml`、`technical.yaml`，另加覆盖 6 个示例所需 Policy）并重写 6 个示例为 `Policy.from_file` + `execute`；验收：「示例可运行」Scenario 满足（6 示例逐一跑通，Semantic 用 Fake Provider）
-- [ ] 9.6 全量质量检查；验收：`ruff`、`mypy`、`pytest`、`python -m build`（wheel/sdist）全部通过
+- [x] 9.6 全量质量检查；验收：`ruff`、`mypy`、`pytest`、`python -m build`（wheel/sdist）全部通过
 
 ## Workflow follow-up
 

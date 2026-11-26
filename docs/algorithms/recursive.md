@@ -5,18 +5,17 @@ resulting leaf fragments back up to `chunk_size`. Sentence/paragraph/heading
 splits are expressed as separator rules; there are no dedicated sentence or
 paragraph algorithms.
 
-```python
-engine.chunk(text, {
-    "organization": "flat",
-    "strategy": "recursive",
-    "config": {
-        "chunk_size": 500,
-        "separators": ["\n\n", "\n", "。", "！", "？", "；", "，", ""],
-        "overlap": 0,
-        "keep_separator": "previous",
-        "max_depth": None,
-    },
-})
+```yaml
+pipeline:
+  levels:
+    - name: paragraph
+      strategy: recursive
+      params:
+        chunk_size: 500
+        separators: ["\n\n", "\n", "。", "！", "？", "；", "，", ""]
+        overlap: 0
+        keep_separator: previous
+        max_depth: null
 ```
 
 ## Splitting
@@ -25,8 +24,8 @@ A fragment longer than `chunk_size` is split by the separator at its current
 priority level; pieces still too long descend to the next separator level —
 never the same level twice. Leaves are fragments at most `chunk_size` long.
 
-- Separators are `str` literals (internally `re.escape`d) or `re.Pattern`s,
-  applied highest priority first.
+- Separators are `str` literals or `{value: "<pattern>", regex: true}`
+  regex declarations, applied highest priority first.
 - `""` in the list means code-point fallback; exhausting the list does the
   same. `separators=[]` means fallback only.
 - A separator with no match pushes the fragment to the next level unchanged.
@@ -53,7 +52,7 @@ a merge never spans a `"none"`-gap. With `overlap > 0`, each chunk carries
 `min(overlap, prev_len - 1)` code points of the previous chunk's tail, so
 `start_offset` stays strictly increasing; carry is 0 across a gap.
 
-## Strategy metadata
+## strategy_metadata
 
 - `separator_used` — the separator that produced the chunk (literal string,
   regex source, `""` for char fallback, `null` when the input never split).
@@ -62,4 +61,4 @@ a merge never spans a `"none"`-gap. With `overlap > 0`, each chunk carries
 
 Merged chunks record their first leaf's separator info.
 
-See `examples/flat_recursive.py`.
+See `examples/single_level_recursive.py`.

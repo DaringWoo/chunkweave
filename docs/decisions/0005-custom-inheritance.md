@@ -1,6 +1,9 @@
 # ADR 0005: custom metadata inheritance
 
-**Status:** accepted · **Date:** 2026-11-25
+**Status:** superseded by 0010 · **Date:** 2026-11-25
+
+> custom 继承与保留键冲突规则已由 `metadata.fields` 声明式来源与
+> ADR 0010 的 include 复制语义、保留键校验替代。
 
 ## Context
 

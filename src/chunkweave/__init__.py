@@ -1,4 +1,4 @@
-"""chunkweave: composable text chunking and organization engine."""
+"""chunkweave: declarative, policy-driven text chunking engine."""
 
 from .compiler import ExecutionPlan, PlanField, PlanLevel
 from .engine import ChunkEngine, Registry, StrategySpec

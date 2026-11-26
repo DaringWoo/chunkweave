@@ -1,6 +1,9 @@
 # ADR 0004: SimilarityProvider protocol
 
-**Status:** accepted · **Date:** 2026-11-25
+**Status:** partially superseded by 0011 · **Date:** 2026-11-25
+
+> `score`/`score_batch` 协议仍然有效；注入方式（`set_provider`）已由
+> ADR 0011 的按次 `provider=` 注入与 `requires_provider` 声明替代。
 
 ## Context
 

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "chunkweave"
 version = "0.1.0"
-description = "A composable text chunking and organization engine with decoupled strategies and organization structures"
+description = "Declarative, policy-driven text chunking engine"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

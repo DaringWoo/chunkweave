@@ -4,14 +4,19 @@ Splits text where the similarity between adjacent semantic units drops
 below `threshold`. Similarity comes from an injected provider — the core
 package has no model dependency.
 
+```yaml
+pipeline:
+  levels:
+    - name: topic
+      strategy: semantic
+      params:
+        threshold: 0.7
+        chunk_size: 500
+        unit_separators: ["\n\n", "\n", "。", "！", "？"]
+```
+
 ```python
-engine.set_provider(MyProvider())
-engine.chunk(text, {
-    "organization": "flat",
-    "strategy": "semantic",
-    "config": {"threshold": 0.7, "chunk_size": 500,
-               "unit_separators": ["\n\n", "\n", "。", "！", "？"]},
-})
+result = engine.execute(text, policy, provider=MyProvider())
 ```
 
 ## Provider protocol
@@ -48,10 +53,10 @@ A semantic block longer than `chunk_size` is re-split through the recursive
 mechanism over `unit_separators` (with code-point fallback), so no emitted
 chunk ever exceeds `chunk_size`.
 
-## Strategy metadata
+## strategy_metadata
 
 `boundary_score` — the score that opened the boundary at this chunk's start;
 `null` for the first chunk of the result and for boundaries produced by the
 length fallback.
 
-See `examples/flat_semantic.py`.
+See `examples/single_level_semantic.py`.

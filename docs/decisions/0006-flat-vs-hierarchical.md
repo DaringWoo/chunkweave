@@ -1,6 +1,9 @@
 # ADR 0006: Flat is not single-level Hierarchical
 
-**Status:** accepted · **Date:** 2026-11-25
+**Status:** superseded by 0007 · **Date:** 2026-11-25
+
+> Flat/Hierarchical 双组织类型已由 ADR 0007 的统一 `pipeline.levels`
+> 取代（单层即平铺）；单层输出现在也携带 `level`/`sequence` 属性。
 
 ## Context
 
