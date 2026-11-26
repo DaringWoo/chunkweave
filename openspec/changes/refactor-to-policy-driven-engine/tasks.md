@@ -9,12 +9,12 @@
 ## 2. Policy DSL 与 Schema
 
 - [ ] 2.1 定义异常体系：`ChunkweaveError` 基类；`PolicyLoadError`（文件读取、YAML 语法、根节点非映射、不安全标签）；`PolicyValidationError`（结构与语义校验，携带字段路径）及子类 `UnregisteredStrategyError`；保留 `RegistryConflictError`、`ProviderMissingError`；新增 `ContextResolutionError`；删除 `ConfigError`、`MetadataConflictError`；验收：各错误路径抛出对应类型，相关 pytest 断言通过
-- [ ] 2.2 在 `pyproject.toml` 加核心依赖 `pydantic>=2`、`PyYAML`，开发依赖加 `types-PyYAML`；验收：干净环境 `pip install .` 后 `import chunkweave` 成功，mypy 通过
-- [ ] 2.3 用 Pydantic V2 实现 Policy 模型（`api_version`、`policy` 身份信息、`pipeline.levels`、`metadata.fields`/`include`），`policy.id`/`name`/`version`/`pipeline.levels`/`metadata.fields` 可直接属性访问，且 `policy.policy.id` 等嵌套路径可用；验收：对应 `policy-engine` 的「Policy 顶层结构」「Policy 对象访问」Scenario 测试通过
-- [ ] 2.4 实现 `Policy.from_file(path)`（UTF-8）与 `Policy.from_yaml(yaml_text)`，文件不存在、YAML 语法错误、根节点非映射报 `PolicyLoadError`；安全解析，`!!python/object` 等对象构造标签被拒绝；验收：「从文件与字符串加载」全部 Scenario（含不安全标签）测试通过
-- [ ] 2.5 实现结构校验：必填项、类型检查、错误信息含字段路径（如 `pipeline.levels[1].strategy`），`api_version` 固定 `chunkweave/v1`；验收：「结构校验」「API 版本识别」Scenario 测试通过
-- [ ] 2.6 实现未知字段拒绝（顶层/`policy`/`pipeline`/level/`metadata`/`metadata.include`/字段配置；`value` 内容豁免）与 `policy.version` 的 `MAJOR.MINOR.PATCH` 格式校验；验收：「未知字段拒绝」「Policy 版本格式」Scenario 测试通过
-- [ ] 2.7 实现 Metadata 字段声明校验：`value`/`source` 互斥（`value: null` 合法）、`value` JSON 可序列化、`source` 为 `context.` 前缀合法路径、include 布尔缺省 true、字段名不得使用保留键（`chunk_id`/`content`/`parent_id`/`level`/`sequence`/`start_offset`/`end_offset`/`strategy`/`strategy_metadata`/`metadata`/`level_name`）；验收：对应 Scenario 测试通过
+- [x] 2.2 在 `pyproject.toml` 加核心依赖 `pydantic>=2`、`PyYAML`，开发依赖加 `types-PyYAML`；验收：干净环境 `pip install .` 后 `import chunkweave` 成功，mypy 通过
+- [x] 2.3 用 Pydantic V2 实现 Policy 模型（`api_version`、`policy` 身份信息、`pipeline.levels`、`metadata.fields`/`include`），`policy.id`/`name`/`version`/`pipeline.levels`/`metadata.fields` 可直接属性访问，且 `policy.policy.id` 等嵌套路径可用；验收：对应 `policy-engine` 的「Policy 顶层结构」「Policy 对象访问」Scenario 测试通过
+- [x] 2.4 实现 `Policy.from_file(path)`（UTF-8）与 `Policy.from_yaml(yaml_text)`，文件不存在、YAML 语法错误、根节点非映射报 `PolicyLoadError`；安全解析，`!!python/object` 等对象构造标签被拒绝；验收：「从文件与字符串加载」全部 Scenario（含不安全标签）测试通过
+- [x] 2.5 实现结构校验：必填项、类型检查、错误信息含字段路径（如 `pipeline.levels[1].strategy`），`api_version` 固定 `chunkweave/v1`；验收：「结构校验」「API 版本识别」Scenario 测试通过
+- [x] 2.6 实现未知字段拒绝（顶层/`policy`/`pipeline`/level/`metadata`/`metadata.include`/字段配置；`value` 内容豁免）与 `policy.version` 的 `MAJOR.MINOR.PATCH` 格式校验；验收：「未知字段拒绝」「Policy 版本格式」Scenario 测试通过
+- [x] 2.7 实现 Metadata 字段声明校验：`value`/`source` 互斥（`value: null` 合法）、`value` JSON 可序列化、`source` 为 `context.` 前缀合法路径、include 布尔缺省 true、字段名不得使用保留键（`chunk_id`/`content`/`parent_id`/`level`/`sequence`/`start_offset`/`end_offset`/`strategy`/`strategy_metadata`/`metadata`/`level_name`）；验收：对应 Scenario 测试通过
 
 ## 3. Chunk 数据模型
 
@@ -24,7 +24,7 @@
 ## 4. ChunkSpan 与策略输出协议
 
 - [ ] 4.1 定义 `ChunkSpan`（`content`、相对输入文本的 `start_offset`/`end_offset`、`strategy_metadata`）与策略协议（工厂经已校验 `params` 与需要时的 Provider 创建 Chunker，`chunk(text)` 返回 ChunkSpan 序列、声明参数 Schema、无 `metadata_keys`），Registry 提供参数 Schema 供校验；验收：`strategy-registry`「策略协议」「Registry 职责边界」Scenario 测试通过
-- [ ] 4.2 改造 `sliding_window`、`recursive`、`semantic` 三策略输出 ChunkSpan（局部 `start_offset`/`end_offset`），算法行为不变；验收：既有算法测试全部通过且 `chunking-strategies`「结果顺序与元数据归属」Scenario 通过
+- [x] 4.2 改造 `sliding_window`、`recursive`、`semantic` 三策略输出 ChunkSpan（局部 `start_offset`/`end_offset`），算法行为不变；验收：既有算法测试全部通过且 `chunking-strategies`「结果顺序与元数据归属」Scenario 通过
 - [ ] 4.3 改造 Semantic Provider 为按次注入协议（不在 Policy/IR/序列化中出现）；验收：「Semantic Provider 注入协议」Scenario 测试通过
 - [ ] 4.4 自定义 Chunker 注册条件为「符合协议、提供参数 Schema 并声明是否需要 Provider」；验收：「自定义 Chunker 注册」Scenario 测试通过
 

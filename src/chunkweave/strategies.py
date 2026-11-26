@@ -1,9 +1,15 @@
-"""Chunking strategies and their protocols.
+"""Chunking strategies, their parameter models and protocols.
 
-``Chunker`` is the strategy contract, ``SimilarityProvider`` the injected
-similarity computation for semantic chunking, ``ProviderAware`` the opt-in
-injection point. Builtin strategies: ``sliding_window``, ``recursive``,
+``Chunker`` is the strategy contract: ``chunk(text)`` returns
+:class:`ChunkSpan` objects whose offsets are relative to the input text.
+``SimilarityProvider`` is the injected similarity computation for semantic
+chunking. Builtin strategies: ``sliding_window``, ``recursive``,
 ``semantic``.
+
+The ``Legacy*`` classes adapt the old dataclass-driven API (config
+dataclass in, :class:`Chunk` out, ``metadata_keys`` declared) onto the new
+chunkers; they exist only so the pre-refactor engine keeps working and are
+removed together with the old API.
 """
 
 from __future__ import annotations
@@ -12,39 +18,160 @@ import itertools
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, ClassVar, Literal, Protocol, runtime_checkable
 
-from .config import (
-    KeepSeparator,
-    RecursiveConfig,
-    SemanticConfig,
-    Separator,
-    SlidingWindowConfig,
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    field_validator,
+    model_validator,
 )
+
 from .models import (
     Chunk,
     ChunkMetadata,
+    ChunkSpan,
     ChunkweaveError,
     ProviderMissingError,
     chunk_id_for,
 )
+
+if TYPE_CHECKING:
+    from .config import RecursiveConfig, SemanticConfig, SlidingWindowConfig
+
+Separator = str | re.Pattern[str]
+KeepSeparator = Literal["previous", "next", "none"]
+
+DEFAULT_SEPARATORS: tuple[str, ...] = ("\n\n", "\n", "。", "！", "？", "；", "，", "")
+DEFAULT_UNIT_SEPARATORS: tuple[str, ...] = ("\n\n", "\n", "。", "！", "？")
+
+
+# ---------------------------------------------------------------------------
+# Parameter models (Policy ``params`` payload, JSON-serializable form)
+# ---------------------------------------------------------------------------
+
+
+class SeparatorSpec(BaseModel):
+    """A declared separator: a literal string, or a regex via ``regex: true``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    value: str
+    regex: StrictBool = False
+
+    @model_validator(mode="after")
+    def _regex_must_compile(self) -> SeparatorSpec:
+        if self.regex:
+            try:
+                re.compile(self.value)
+            except re.error as e:
+                raise ValueError(f"separator regex does not compile: {e}") from e
+        return self
+
+
+SeparatorDecl = str | SeparatorSpec
+"""Declared separator form in ``params``: literal string or ``SeparatorSpec``."""
+
+
+def compile_separator(decl: SeparatorDecl) -> Separator:
+    """Compile a declared separator to ``str`` or ``re.Pattern``."""
+    if isinstance(decl, SeparatorSpec):
+        return re.compile(decl.value) if decl.regex else decl.value
+    return decl
+
+
+def _decl_from_separator(sep: Separator) -> SeparatorDecl:
+    """Convert an old ``Separator`` (``str`` | ``re.Pattern``) to declared form."""
+    if isinstance(sep, re.Pattern):
+        return SeparatorSpec(value=sep.pattern, regex=True)
+    return sep
+
+
+def _default_separators() -> list[SeparatorDecl]:
+    return list(DEFAULT_SEPARATORS)
+
+
+def _default_unit_separators() -> list[SeparatorDecl]:
+    return list(DEFAULT_UNIT_SEPARATORS)
+
+
+class SlidingWindowParams(BaseModel):
+    """``params`` for ``sliding_window``. Lengths are Unicode code points."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_size: StrictInt = Field(gt=0)
+    overlap: StrictInt = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _overlap_below_size(self) -> SlidingWindowParams:
+        if self.overlap >= self.chunk_size:
+            raise ValueError(
+                f"overlap must satisfy 0 <= overlap < chunk_size, got {self.overlap}"
+            )
+        return self
+
+
+class RecursiveParams(BaseModel):
+    """``params`` for ``recursive``. ``separators`` mix literals and regexes."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_size: StrictInt = Field(gt=0)
+    separators: list[SeparatorDecl] = Field(
+        default_factory=_default_separators
+    )
+    overlap: StrictInt = Field(default=0, ge=0)
+    keep_separator: KeepSeparator = "previous"
+    max_depth: StrictInt | None = None
+
+    @model_validator(mode="after")
+    def _max_depth_positive(self) -> RecursiveParams:
+        if self.max_depth is not None and self.max_depth <= 0:
+            raise ValueError(f"max_depth must be > 0, got {self.max_depth}")
+        return self
+
+
+class SemanticParams(BaseModel):
+    """``params`` for ``semantic``. Provider is injected, never declared."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    threshold: float = Field(ge=0.0, le=1.0)
+    chunk_size: StrictInt = Field(gt=0)
+    unit_separators: list[SeparatorDecl] = Field(
+        default_factory=_default_unit_separators
+    )
+
+    @field_validator("threshold", mode="before")
+    @classmethod
+    def _threshold_is_number(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, int | float):
+            raise ValueError(
+                f"threshold must be a number in [0, 1], got {type(value).__name__}"
+            )
+        return float(value)
+
+
+# ---------------------------------------------------------------------------
+# Protocols
+# ---------------------------------------------------------------------------
 
 
 @runtime_checkable
 class Chunker(Protocol):
     """A text chunking strategy.
 
-    Implementations receive their configuration at construction time and
-    produce :class:`Chunk` results plus their declared strategy metadata.
-    They MUST NOT set organization fields (``parent_id``, ``level``,
-    ``sequence``); that is the organization layer's job.
+    Implementations receive their validated params (and, when required, an
+    injected provider) at construction time and produce :class:`ChunkSpan`
+    results; organization fields and business metadata are not their job.
     """
 
-    metadata_keys: ClassVar[frozenset[str]]
-    """Strategy metadata keys this chunker may produce."""
-
-    def chunk(self, text: str) -> Sequence[Chunk]:
-        """Split ``text`` and return chunks in stable input order."""
+    def chunk(self, text: str) -> list[ChunkSpan]:
+        """Split ``text`` and return spans in stable input order."""
         ...
 
 
@@ -63,53 +190,27 @@ class SimilarityProvider(Protocol):
 
 
 @runtime_checkable
+class LegacyChunker(Protocol):
+    """The pre-refactor strategy contract (config in, ``Chunk`` out).
+
+    Still consumed by the old organization/engine path; removed with it.
+    """
+
+    metadata_keys: ClassVar[frozenset[str]]
+    """Strategy metadata keys this chunker may produce."""
+
+    def chunk(self, text: str) -> Sequence[Chunk]:
+        """Split ``text`` and return chunks in stable input order."""
+        ...
+
+
+@runtime_checkable
 class ProviderAware(Protocol):
     """A chunker that accepts an injected similarity provider."""
 
     def set_provider(self, provider: SimilarityProvider) -> None:
         """Inject the similarity provider used by ``chunk``."""
         ...
-
-
-class SlidingWindowChunker:
-    """Splits text into fixed-size windows advancing by ``chunk_size - overlap``.
-
-    ``overlap = 0`` is fixed-size chunking; no separate FixedSize algorithm
-    exists. Windows always advance, so the loop terminates.
-    """
-
-    metadata_keys: ClassVar[frozenset[str]] = frozenset({"window_index", "overlap_size"})
-
-    def __init__(self, config: SlidingWindowConfig) -> None:
-        self.config = config
-
-    def chunk(self, text: str) -> Sequence[Chunk]:
-        if not text:
-            return []
-        size = self.config.chunk_size
-        step = size - self.config.overlap
-        chunks: list[Chunk] = []
-        start = 0
-        index = 0
-        while start < len(text):
-            end = min(start + size, len(text))
-            chunks.append(
-                Chunk(
-                    chunk_id=chunk_id_for(index),
-                    content=text[start:end],
-                    start_offset=start,
-                    end_offset=end,
-                    metadata=ChunkMetadata(
-                        strategy={
-                            "window_index": index,
-                            "overlap_size": 0 if index == 0 else self.config.overlap,
-                        }
-                    ),
-                )
-            )
-            index += 1
-            start += step
-        return chunks
 
 
 CHAR_FALLBACK_SEPARATOR = ""
@@ -266,24 +367,6 @@ def _apply_overlap(merged: list[_Fragment], overlap: int) -> list[_Fragment]:
     return out
 
 
-def _fragments_to_chunks(text: str, fragments: list[_Fragment]) -> list[Chunk]:
-    return [
-        Chunk(
-            chunk_id=chunk_id_for(i),
-            content=text[f.start : f.end],
-            start_offset=f.start,
-            end_offset=f.end,
-            metadata=ChunkMetadata(
-                strategy={
-                    "separator_used": f.separator_used,
-                    "separator_level": f.separator_level,
-                }
-            ),
-        )
-        for i, f in enumerate(fragments)
-    ]
-
-
 def split_text(
     text: str,
     separators: Sequence[Separator],
@@ -299,29 +382,80 @@ def split_text(
     return [(f.start, f.end) for f in merged]
 
 
+# ---------------------------------------------------------------------------
+# Builtin chunkers (new contract: params model in, ChunkSpan out)
+# ---------------------------------------------------------------------------
+
+
+class SlidingWindowChunker:
+    """Splits text into fixed-size windows advancing by ``chunk_size - overlap``.
+
+    ``overlap = 0`` is fixed-size chunking; no separate FixedSize algorithm
+    exists. Windows always advance, so the loop terminates.
+    """
+
+    def __init__(self, params: SlidingWindowParams) -> None:
+        self.params = params
+
+    def chunk(self, text: str) -> list[ChunkSpan]:
+        if not text:
+            return []
+        size = self.params.chunk_size
+        step = size - self.params.overlap
+        spans: list[ChunkSpan] = []
+        start = 0
+        index = 0
+        while start < len(text):
+            end = min(start + size, len(text))
+            spans.append(
+                ChunkSpan(
+                    content=text[start:end],
+                    start_offset=start,
+                    end_offset=end,
+                    strategy_metadata={
+                        "window_index": index,
+                        "overlap_size": 0 if index == 0 else self.params.overlap,
+                    },
+                )
+            )
+            index += 1
+            start += step
+        return spans
+
+
 class RecursiveChunker:
     """Splits text by separator priority, then merges leaves up to ``chunk_size``."""
 
-    metadata_keys: ClassVar[frozenset[str]] = frozenset(
-        {"separator_used", "separator_level"}
-    )
+    def __init__(self, params: RecursiveParams) -> None:
+        self.params = params
+        self._separators: list[Separator] = [
+            compile_separator(d) for d in params.separators
+        ]
 
-    def __init__(self, config: RecursiveConfig) -> None:
-        self.config = config
-
-    def chunk(self, text: str) -> Sequence[Chunk]:
+    def chunk(self, text: str) -> list[ChunkSpan]:
         if not text:
             return []
         leaves = _leaf_fragments(
             text,
-            self.config.separators,
-            self.config.keep_separator,
-            self.config.chunk_size,
-            self.config.max_depth,
+            self._separators,
+            self.params.keep_separator,
+            self.params.chunk_size,
+            self.params.max_depth,
         )
-        merged = _merge_fragments(leaves, self.config.chunk_size)
-        merged = _apply_overlap(merged, self.config.overlap)
-        return _fragments_to_chunks(text, merged)
+        merged = _merge_fragments(leaves, self.params.chunk_size)
+        merged = _apply_overlap(merged, self.params.overlap)
+        return [
+            ChunkSpan(
+                content=text[f.start : f.end],
+                start_offset=f.start,
+                end_offset=f.end,
+                strategy_metadata={
+                    "separator_used": f.separator_used,
+                    "separator_level": f.separator_level,
+                },
+            )
+            for f in merged
+        ]
 
 
 def _semantic_units(text: str, separators: Sequence[Separator]) -> list[tuple[int, int]]:
@@ -346,21 +480,27 @@ def _semantic_units(text: str, separators: Sequence[Separator]) -> list[tuple[in
 class SemanticChunker:
     """Splits text where adjacent-unit similarity drops below ``threshold``.
 
-    Requires an injected :class:`SimilarityProvider`; provider exceptions
-    propagate unchanged. Semantic blocks longer than ``chunk_size`` are
-    re-split through the recursive mechanism so the length limit always holds.
+    Requires an injected :class:`SimilarityProvider` at construction time;
+    provider exceptions propagate unchanged. Semantic blocks longer than
+    ``chunk_size`` are re-split through the recursive mechanism so the length
+    limit always holds.
     """
 
-    metadata_keys: ClassVar[frozenset[str]] = frozenset({"boundary_score"})
-
     def __init__(
-        self, config: SemanticConfig, provider: SimilarityProvider | None = None
+        self, params: SemanticParams, provider: SimilarityProvider | None
     ) -> None:
-        self.config = config
+        self.params = params
         self.provider = provider
-
-    def set_provider(self, provider: SimilarityProvider) -> None:
-        self.provider = provider
+        self._unit_separators: list[Separator] = [
+            compile_separator(d) for d in params.unit_separators
+        ]
+        self._fallback = RecursiveChunker(
+            RecursiveParams(
+                chunk_size=params.chunk_size,
+                separators=list(params.unit_separators),
+                keep_separator="previous",
+            )
+        )
 
     def _scores(self, pairs: list[tuple[str, str]]) -> list[float]:
         assert self.provider is not None
@@ -369,13 +509,13 @@ class SemanticChunker:
             return [float(s) for s in batch(pairs)]
         return [float(self.provider.score(left, right)) for left, right in pairs]
 
-    def chunk(self, text: str) -> Sequence[Chunk]:
+    def chunk(self, text: str) -> list[ChunkSpan]:
         if self.provider is None:
             raise ProviderMissingError("semantic")
         if not text:
             return []
 
-        units = _semantic_units(text, self.config.unit_separators)
+        units = _semantic_units(text, self._unit_separators)
         if not units:
             return []
 
@@ -398,7 +538,7 @@ class SemanticChunker:
             cur_start, cur_end = units[0]
             cur_score: float | None = None
             for i, score in enumerate(scores):
-                if score < self.config.threshold:
+                if score < self.params.threshold:
                     blocks.append((cur_start, cur_end))
                     block_scores.append(cur_score)
                     cur_start = units[i + 1][0]
@@ -407,29 +547,112 @@ class SemanticChunker:
             blocks.append((cur_start, cur_end))
             block_scores.append(cur_score)
 
-        chunks: list[Chunk] = []
+        spans: list[ChunkSpan] = []
         for (block_start, block_end), boundary_score in zip(blocks, block_scores, strict=True):
-            if block_end - block_start <= self.config.chunk_size:
+            if block_end - block_start <= self.params.chunk_size:
                 ranges = [(block_start, block_end)]
             else:
                 ranges = [
-                    (block_start + s, block_start + e)
-                    for s, e in split_text(
-                        text[block_start:block_end],
-                        self.config.unit_separators,
-                        self.config.chunk_size,
-                        keep="previous",
-                    )
+                    (block_start + s.start_offset, block_start + s.end_offset)
+                    for s in self._fallback.chunk(text[block_start:block_end])
                 ]
             for i, (start, end) in enumerate(ranges):
-                chunk_score = boundary_score if i == 0 else None
-                chunks.append(
-                    Chunk(
-                        chunk_id=chunk_id_for(len(chunks)),
+                span_score = boundary_score if i == 0 else None
+                spans.append(
+                    ChunkSpan(
                         content=text[start:end],
                         start_offset=start,
                         end_offset=end,
-                        metadata=ChunkMetadata(strategy={"boundary_score": chunk_score}),
+                        strategy_metadata={"boundary_score": span_score},
                     )
                 )
-        return chunks
+        return spans
+
+
+# ---------------------------------------------------------------------------
+# Legacy adapters (old API compatibility; removed with the old API)
+# ---------------------------------------------------------------------------
+
+
+def _spans_to_chunks(spans: Sequence[ChunkSpan]) -> list[Chunk]:
+    """Convert ChunkSpans back into old-style ``Chunk`` objects."""
+    return [
+        Chunk(
+            chunk_id=chunk_id_for(i),
+            content=s.content,
+            start_offset=s.start_offset,
+            end_offset=s.end_offset,
+            metadata=ChunkMetadata(strategy=dict(s.strategy_metadata)),
+        )
+        for i, s in enumerate(spans)
+    ]
+
+
+class LegacySlidingWindowChunker(SlidingWindowChunker):
+    """Old ``SlidingWindowConfig``-driven wrapper over the new chunker."""
+
+    metadata_keys: ClassVar[frozenset[str]] = frozenset({"window_index", "overlap_size"})
+
+    def __init__(self, config: SlidingWindowConfig) -> None:
+        self.config = config
+        super().__init__(
+            SlidingWindowParams(chunk_size=config.chunk_size, overlap=config.overlap)
+        )
+
+    def chunk(self, text: str) -> Sequence[Chunk]:  # type: ignore[override]
+        return _spans_to_chunks(super().chunk(text))
+
+
+class LegacyRecursiveChunker(RecursiveChunker):
+    """Old ``RecursiveConfig``-driven wrapper over the new chunker."""
+
+    metadata_keys: ClassVar[frozenset[str]] = frozenset(
+        {"separator_used", "separator_level"}
+    )
+
+    def __init__(self, config: RecursiveConfig) -> None:
+        self.config = config
+        super().__init__(
+            RecursiveParams(
+                chunk_size=config.chunk_size,
+                separators=[_decl_from_separator(s) for s in config.separators],
+                overlap=config.overlap,
+                keep_separator=config.keep_separator,
+                max_depth=config.max_depth,
+            )
+        )
+
+    def chunk(self, text: str) -> Sequence[Chunk]:  # type: ignore[override]
+        return _spans_to_chunks(super().chunk(text))
+
+
+class LegacySemanticChunker(SemanticChunker):
+    """Old ``SemanticConfig``-driven wrapper over the new chunker.
+
+    Keeps the old optional-provider shape: the provider may be injected after
+    construction via ``set_provider``; chunking without one raises
+    :class:`ProviderMissingError`.
+    """
+
+    metadata_keys: ClassVar[frozenset[str]] = frozenset({"boundary_score"})
+
+    def __init__(
+        self, config: SemanticConfig, provider: SimilarityProvider | None = None
+    ) -> None:
+        self.config = config
+        super().__init__(
+            SemanticParams(
+                threshold=config.threshold,
+                chunk_size=config.chunk_size,
+                unit_separators=[
+                    _decl_from_separator(s) for s in config.unit_separators
+                ],
+            ),
+            provider,
+        )
+
+    def set_provider(self, provider: SimilarityProvider) -> None:
+        self.provider = provider
+
+    def chunk(self, text: str) -> Sequence[Chunk]:  # type: ignore[override]
+        return _spans_to_chunks(super().chunk(text))

@@ -9,12 +9,27 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from .models import ConfigError
+from .strategies import (
+    DEFAULT_SEPARATORS,
+    DEFAULT_UNIT_SEPARATORS,
+    KeepSeparator,
+    Separator,
+)
 
-Separator = str | re.Pattern[str]
-KeepSeparator = Literal["previous", "next", "none"]
-
-DEFAULT_SEPARATORS: tuple[str, ...] = ("\n\n", "\n", "。", "！", "？", "；", "，", "")
-DEFAULT_UNIT_SEPARATORS: tuple[str, ...] = ("\n\n", "\n", "。", "！", "？")
+__all__ = [
+    "DEFAULT_SEPARATORS",
+    "DEFAULT_UNIT_SEPARATORS",
+    "EngineConfig",
+    "FlatConfig",
+    "HierarchicalConfig",
+    "KeepSeparator",
+    "LevelConfig",
+    "RecursiveConfig",
+    "SemanticConfig",
+    "Separator",
+    "SlidingWindowConfig",
+    "engine_config_from_dict",
+]
 
 
 def _require_positive_int(name: str, value: Any) -> int:

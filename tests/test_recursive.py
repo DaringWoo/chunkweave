@@ -1,14 +1,13 @@
 """Recursive strategy: priority splitting, merging, keep/overlap, metadata."""
 
 import itertools
-import re
 
-from chunkweave import RecursiveConfig
+from chunkweave import RecursiveParams
 from chunkweave.strategies import RecursiveChunker
 
 
 def make(chunk_size, **kwargs):
-    return RecursiveChunker(RecursiveConfig(chunk_size=chunk_size, **kwargs))
+    return RecursiveChunker(RecursiveParams(chunk_size=chunk_size, **kwargs))
 
 
 def spans(chunks):
@@ -29,7 +28,7 @@ def test_multilevel_separator_descent():
     text = "aa\n\nbb\ncc"
     chunks = make(4, separators=["\n\n", "\n"]).chunk(text)
     assert spans(chunks) == [(0, 4), (4, 7), (7, 9)]
-    meta = [c.metadata.strategy for c in chunks]
+    meta = [c.strategy_metadata for c in chunks]
     assert meta[0]["separator_used"] == "\n\n"
     assert meta[0]["separator_level"] == 0
     assert meta[1]["separator_used"] == "\n"
@@ -40,22 +39,24 @@ def test_text_within_size_no_split():
     chunks = make(100, separators=["\n\n"]).chunk("short text")
     assert len(chunks) == 1
     assert chunks[0].content == "short text"
-    assert "separator_used" in chunks[0].metadata.strategy
-    assert "separator_level" in chunks[0].metadata.strategy
+    assert "separator_used" in chunks[0].strategy_metadata
+    assert "separator_level" in chunks[0].strategy_metadata
 
 
 def test_regex_separator():
     text = "第一章aaa第二章bbb第三章c"
-    chunks = make(6, separators=[re.compile(r"第[一二三四五六七八九十]+章")]).chunk(text)
+    chunks = make(
+        6, separators=[{"value": r"第[一二三四五六七八九十]+章", "regex": True}]
+    ).chunk(text)
     assert spans(chunks) == [(0, 3), (3, 9), (9, 15), (15, 16)]
     assert_offsets(chunks, text)
-    assert chunks[0].metadata.strategy["separator_used"] == r"第[一二三四五六七八九十]+章"
+    assert chunks[0].strategy_metadata["separator_used"] == r"第[一二三四五六七八九十]+章"
 
 
 def test_no_match_falls_back_to_chars():
     chunks = make(3, separators=[","]).chunk("abcdefg")
     assert spans(chunks) == [(0, 3), (3, 6), (6, 7)]
-    assert all(c.metadata.strategy["separator_used"] == "" for c in chunks)
+    assert all(c.strategy_metadata["separator_used"] == "" for c in chunks)
 
 
 def test_empty_separator_list_only_fallback():
@@ -66,11 +67,11 @@ def test_empty_separator_list_only_fallback():
 def test_explicit_empty_separator_is_char_fallback():
     chunks = make(4, separators=["\n\n", ""]).chunk("aaaa\n\nbbbbbb")
     assert spans(chunks) == [(0, 4), (4, 6), (6, 10), (10, 12)]
-    assert all(c.metadata.strategy["separator_used"] == "" for c in chunks)
+    assert all(c.strategy_metadata["separator_used"] == "" for c in chunks)
 
 
 def test_empty_match_regex_no_deadlock():
-    chunks = make(3, separators=[re.compile("x*")]).chunk("abcabcabc")
+    chunks = make(3, separators=[{"value": "x*", "regex": True}]).chunk("abcabcabc")
     assert spans(chunks) == [(0, 3), (3, 6), (6, 9)]
 
 
@@ -121,7 +122,7 @@ def test_merged_chunk_takes_first_leaf_separator():
     # level-0 "\n\n" -> [0,8) too big -> level-1 "\n" -> [0,3),[3,5),[5,7),[7,8);
     # plus leaf [8,10) "ef" from level 0. Merged: [(0,3),(3,7),(7,10)]
     assert spans(chunks) == [(0, 3), (3, 7), (7, 10)]
-    metas = [c.metadata.strategy for c in chunks]
+    metas = [c.strategy_metadata for c in chunks]
     assert metas[0]["separator_used"] == "\n" and metas[0]["separator_level"] == 1
     # [3,7) merged two level-1 leaves; [7,10) merged a level-1 leaf with the
     # level-0 "ef" leaf -> first leaf's separator wins in both cases
@@ -150,7 +151,7 @@ def test_keep_next_attaches_separator_after():
 def test_keep_next_heading_style():
     text = "第一章aaa第二章bbb"
     chunks = make(
-        8, separators=[re.compile(r"第[一二三四]+章")], keep_separator="next"
+        8, separators=[{"value": r"第[一二三四]+章", "regex": True}], keep_separator="next"
     ).chunk(text)
     assert spans(chunks) == [(0, 6), (6, 12)]
     assert chunks[0].content == "第一章aaa"
@@ -168,7 +169,7 @@ def test_keep_none_drops_separator_leaves_gap():
 
 def test_keep_none_with_regex_keeps_match_text_out():
     text = "aa!!bb"
-    chunks = make(4, separators=[re.compile("!+")], keep_separator="none").chunk(
+    chunks = make(4, separators=[{"value": "!+", "regex": True}], keep_separator="none").chunk(
         text
     )
     assert spans(chunks) == [(0, 2), (4, 6)]
@@ -214,9 +215,9 @@ def test_overlap_never_crosses_gap():
 def test_separator_metadata_present():
     chunks = make(4, separators=["\n\n", "\n"]).chunk("aa\n\nbb\ncc")
     for c in chunks:
-        assert "separator_used" in c.metadata.strategy
-        assert "separator_level" in c.metadata.strategy
-        assert c.metadata.organization == {}
+        assert "separator_used" in c.strategy_metadata
+        assert "separator_level" in c.strategy_metadata
+        assert not {"parent_id", "level", "sequence"} & c.strategy_metadata.keys()
 
 
 def test_final_segment_without_separator():

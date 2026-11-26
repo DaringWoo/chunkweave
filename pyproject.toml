@@ -21,7 +21,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: Text Processing",
 ]
-dependencies = []
+dependencies = ["pydantic>=2,<3", "PyYAML>=6"]
 
 [project.optional-dependencies]
 # Semantic similarity adapters (embedding clients) are opt-in extras; the
@@ -33,6 +33,7 @@ dev = [
     "mypy>=1.10",
     "build>=1.2",
     "twine>=5",
+    "types-PyYAML>=6",
 ]
 
 [project.urls]

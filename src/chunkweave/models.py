@@ -6,14 +6,62 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 COMMON_FIELD_NAMES: frozenset[str] = frozenset(
     {"chunk_id", "content", "start_offset", "end_offset"}
 )
 ORGANIZATION_FIELD_NAMES: frozenset[str] = frozenset({"parent_id", "level", "sequence"})
 
+RESERVED_METADATA_KEYS: frozenset[str] = frozenset(
+    {
+        "chunk_id",
+        "content",
+        "parent_id",
+        "level",
+        "sequence",
+        "start_offset",
+        "end_offset",
+        "strategy",
+        "strategy_metadata",
+        "metadata",
+        "level_name",
+    }
+)
+"""Names a Policy ``metadata.fields`` entry must not use."""
+
 
 class ChunkweaveError(Exception):
     """Base class for all chunkweave errors."""
+
+
+class PolicyLoadError(ChunkweaveError):
+    """Raised when a Policy cannot be read or parsed from YAML."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+
+
+class PolicyValidationError(ChunkweaveError):
+    """Raised when a Policy's structure or semantics are invalid."""
+
+    def __init__(self, path: str, reason: str) -> None:
+        self.path = path
+        self.reason = reason
+        where = f" at {path}" if path else ""
+        super().__init__(f"invalid policy{where}: {reason}")
+
+
+class ContextResolutionError(ChunkweaveError):
+    """Raised when a metadata ``source`` cannot be resolved from the Context."""
+
+    def __init__(self, field: str, path: str, reason: str) -> None:
+        self.field = field
+        self.path = path
+        self.reason = reason
+        super().__init__(
+            f"cannot resolve metadata field {field!r} at {path}: {reason}"
+        )
 
 
 class ConfigError(ChunkweaveError):
@@ -137,6 +185,21 @@ class Chunk:
     @classmethod
     def from_json(cls, payload: str) -> Chunk:
         return cls.from_dict(json.loads(payload))
+
+
+class ChunkSpan(BaseModel):
+    """A strategy's raw output: a content slice plus its strategy metadata.
+
+    Offsets are relative to the text the Chunker received, half-open
+    ``[start_offset, end_offset)``, and ``content`` always equals
+    ``text[start_offset:end_offset]``. The runtime later converts these into
+    final :class:`Chunk` objects.
+    """
+
+    content: str
+    start_offset: int
+    end_offset: int
+    strategy_metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 def chunk_id_for(index: int) -> str:

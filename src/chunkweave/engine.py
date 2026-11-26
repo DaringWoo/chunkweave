@@ -23,15 +23,15 @@ from .models import (
     UnregisteredStrategyError,
 )
 from .strategies import (
-    Chunker,
+    LegacyChunker,
+    LegacyRecursiveChunker,
+    LegacySemanticChunker,
+    LegacySlidingWindowChunker,
     ProviderAware,
-    RecursiveChunker,
-    SemanticChunker,
     SimilarityProvider,
-    SlidingWindowChunker,
 )
 
-ChunkerFactory = Callable[[Mapping[str, Any]], Chunker]
+ChunkerFactory = Callable[[Mapping[str, Any]], LegacyChunker]
 
 
 class Registry:
@@ -46,15 +46,15 @@ class Registry:
         if register_builtins:
             self.register(
                 "sliding_window",
-                lambda cfg: SlidingWindowChunker(SlidingWindowConfig.from_dict(cfg)),
+                lambda cfg: LegacySlidingWindowChunker(SlidingWindowConfig.from_dict(cfg)),
             )
             self.register(
                 "recursive",
-                lambda cfg: RecursiveChunker(RecursiveConfig.from_dict(cfg)),
+                lambda cfg: LegacyRecursiveChunker(RecursiveConfig.from_dict(cfg)),
             )
             self.register(
                 "semantic",
-                lambda cfg: SemanticChunker(SemanticConfig.from_dict(cfg)),
+                lambda cfg: LegacySemanticChunker(SemanticConfig.from_dict(cfg)),
             )
 
     def register(
@@ -69,7 +69,7 @@ class Registry:
             raise RegistryConflictError(name)
         self._factories[name] = factory
 
-    def create(self, name: str, config: Mapping[str, Any] | None = None) -> Chunker:
+    def create(self, name: str, config: Mapping[str, Any] | None = None) -> LegacyChunker:
         """Instantiate the strategy registered under ``name``."""
         try:
             factory = self._factories[name]

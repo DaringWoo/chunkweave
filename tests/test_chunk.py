@@ -11,7 +11,15 @@ from chunkweave import (
     SemanticConfig,
     SlidingWindowConfig,
 )
-from chunkweave.strategies import RecursiveChunker, SemanticChunker, SlidingWindowChunker
+from chunkweave.strategies import (
+    LegacyRecursiveChunker as RecursiveChunker,
+)
+from chunkweave.strategies import (
+    LegacySemanticChunker as SemanticChunker,
+)
+from chunkweave.strategies import (
+    LegacySlidingWindowChunker as SlidingWindowChunker,
+)
 
 
 class _FakeProvider:

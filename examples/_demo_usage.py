@@ -9,10 +9,10 @@ from chunkweave import (
     ChunkEngine,
     ChunkMetadata,
     FlatConfig,
-    RecursiveChunker,
     RecursiveConfig,
     chunk_id_for,
 )
+from chunkweave.strategies import LegacyRecursiveChunker
 
 sys.stdout.reconfigure(encoding="utf-8")
 
@@ -29,7 +29,7 @@ def show(chunks, title):
 
 
 # 1) Direct chunker — no engine, no dict, fully typed
-chunks = RecursiveChunker(RecursiveConfig(chunk_size=40)).chunk(TEXT)
+chunks = LegacyRecursiveChunker(RecursiveConfig(chunk_size=40)).chunk(TEXT)
 show(chunks, "1) RecursiveChunker directly")
 
 engine = ChunkEngine()

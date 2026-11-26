@@ -141,6 +141,14 @@ Semantic Provider 通过 `execute(provider=...)` 按次注入，不写入 Policy
 
 核心依赖新增 `pydantic>=2` 与 `PyYAML`（数据校验库与 YAML 解析库），均为轻量依赖；开发依赖新增 `types-PyYAML`；不引入大型模型库或 RAG 框架。Semantic Provider 相关实现仍以可选依赖或零依赖方式提供。
 
+### 实施决策
+
+- [扁平模块布局] → 延续 448d132 的刻意扁平化，不建 `policy/`、`compiler/` 子包；最终为 `models.py`、`strategies.py`、`policy.py`、`compiler.py`、`metadata.py`、`organization.py`、`engine.py`。
+- [新旧并存迁移顺序] → 第 1 批新增新契约（ChunkSpan、参数模型、新 Chunker、Policy 层），旧 API 继续可用；旧 dataclass 驱动包装器改名为 `LegacySlidingWindowChunker`/`LegacyRecursiveChunker`/`LegacySemanticChunker`，接收旧 config、委托新 Chunker、转回旧 `Chunk`，随旧 API 在第 2 批删除。
+- [分隔符声明形式 `SeparatorSpec`] → `params` 保存可 JSON 序列化的声明形式（字面量字符串或 `{value, regex}` 映射），Chunker 构造时才编译为 `re.Pattern`；`regex: true` 的 pattern 在参数校验阶段必须能编译。
+- [参数与 Policy 字段严格类型] → 整数字段拒绝 bool/字符串/float（`StrictInt`），`threshold` 拒绝 bool 与字符串、存为 float，`version` 拒绝 YAML 解析出的 `1.0` 浮点（`StrictStr` + `MAJOR.MINOR.PATCH` 正则）。
+- [`MetadataFieldConfig` 只序列化声明的来源键] → 以 `model_fields_set` 判定 `value`/`source` 恰好声明一个，自定义序列化只输出该键；`{"value": null}` 与 `{"source": ...}` 可区分且 `model_dump()` 往返不漂移（Policy Hash 依赖这一点）。
+
 ## Risks / Trade-offs
 
 - [YAML 隐式类型坑] → `2024-01-01` 会被解析成日期（因不可 JSON 序列化报校验错误），`no`/`yes`/`on`/`off` 会被解析成布尔值；`docs/configuration.md` 与 `docs/metadata.md` 必须提醒用户给这类值加引号。

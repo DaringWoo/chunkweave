@@ -16,12 +16,12 @@ from typing import Any
 
 from .metadata import attach_level_custom, validate_custom_across_levels
 from .models import Chunk, ChunkMetadata, chunk_id_for
-from .strategies import Chunker
+from .strategies import LegacyChunker
 
 
 def run(
     text: str,
-    chunkers: Sequence[Chunker],
+    chunkers: Sequence[LegacyChunker],
     engine_custom: Mapping[str, Any],
     level_metadata: Sequence[Mapping[str, Any]],
     *,
