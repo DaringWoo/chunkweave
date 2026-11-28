@@ -29,9 +29,9 @@ metadata:
 ```
 
 - `value` 固定值：直接写入每个 Chunk 的 `metadata`（`value: null`
-  合法）；值必须可 JSON 序列化。
+  合法）；值必须可无损表示为 JSON：数值有限，对象键为字符串。
 - `source` 动态值：执行时沿 `context.` 后的路径在调用方提供的
-  Context 映射中逐级取值，取到的值也必须可 JSON 序列化。
+  Context 映射中逐级取值，取到的值也必须满足同一 JSON 规则。
 
 **Context 只提供值**：它不提供字段声明——字段集完全由 Policy 决定。
 Context 中未被 `source` 引用的键一律不读、不会出现在 `metadata` 中。

@@ -109,6 +109,24 @@ def test_non_serializable_context_value_raises():
         engine.execute("abcdefgh", policy, context={"obj": object()})
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        {"nested": [float("nan")]},
+        {1: "key"},
+        {"outer": {2: "key"}},
+    ],
+)
+def test_context_value_must_roundtrip_as_json_without_type_loss(bad):
+    engine = ChunkEngine()
+    policy = _single({"bad": {"source": "context.obj"}})
+    with pytest.raises(ContextResolutionError):
+        engine.execute("abcdefgh", policy, context={"obj": bad})
+
+
 def test_context_resolved_even_for_empty_text():
     """Context resolution happens before chunking, empty text included."""
     engine = ChunkEngine()

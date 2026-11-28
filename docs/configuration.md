@@ -100,10 +100,11 @@ metadata:
     tenant: {source: context.request.tenant}  # 执行时从 Context 取值
 ```
 
-- `value`：任意可 JSON 序列化的值；`value: null` 合法且视为已声明。
+- `value`：任意可无损表示为 JSON 的值；`value: null` 合法且视为已声明。
+  数值必须有限（拒绝 `.nan`/`.inf`），对象键必须是字符串。
 - `source`：`context.` 前缀的路径，段名非空即可（`context.a.b.c`）；
   执行时对每次 `execute(context=...)` 提供的映射逐级取值，取到的值
-  也必须可 JSON 序列化。
+  也必须满足同一 JSON 规则。
 - 字段名必须非空，且不得使用保留键。
 - `fields` 对所有层级生效：每个 Chunk 的 `metadata` 含同一字段集，
   各持有独立副本。

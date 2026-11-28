@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from pydantic import BaseModel, Field, computed_field
@@ -22,6 +23,31 @@ RESERVED_METADATA_KEYS: frozenset[str] = frozenset(
     }
 )
 """Names a Policy ``metadata.fields`` entry must not use."""
+
+
+def json_roundtrip_problem(value: Any) -> str | None:
+    """Return why ``value`` is not losslessly representable as JSON, if any."""
+    if value is None or isinstance(value, str | bool | int):
+        return None
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return None
+        return "non-finite floats are not valid JSON values"
+    if isinstance(value, list):
+        for item in value:
+            problem = json_roundtrip_problem(item)
+            if problem is not None:
+                return problem
+        return None
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                return "object keys must be strings"
+            problem = json_roundtrip_problem(item)
+            if problem is not None:
+                return problem
+        return None
+    return f"{type(value).__name__} is not a JSON value"
 
 
 class ChunkweaveError(Exception):

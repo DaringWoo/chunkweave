@@ -9,12 +9,11 @@ independent deep copy.
 from __future__ import annotations
 
 import copy
-import json
 from collections.abc import Mapping
 from typing import Any
 
 from .compiler import ExecutionPlan
-from .models import ContextResolutionError
+from .models import ContextResolutionError, json_roundtrip_problem
 
 
 def resolve_fields(
@@ -49,12 +48,10 @@ def resolve_fields(
                     field.name, dotted, f"missing key 'context.{walked}'"
                 )
             node = node[segment]
-        try:
-            json.dumps(node)
-        except (TypeError, ValueError) as e:
+        if json_roundtrip_problem(node) is not None:
             raise ContextResolutionError(
                 field.name, dotted, "value is not JSON-serializable"
-            ) from e
+            )
         values[field.name] = node
     return values
 

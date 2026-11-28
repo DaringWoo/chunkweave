@@ -349,6 +349,28 @@ def test_value_not_json_serializable():
         Policy.model_validate(data)
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        float("nan"),
+        float("inf"),
+        float("-inf"),
+        {"nested": [float("nan")]},
+        {1: "key"},
+        {"outer": {2: "key"}},
+    ],
+)
+def test_value_must_roundtrip_as_json_without_type_loss(bad):
+    with pytest.raises(ValidationError):
+        MetadataFieldConfig.model_validate({"value": bad})
+
+
+def test_yaml_non_finite_float_value_rejected():
+    doc = MINIMAL + "metadata:\n  fields:\n    k: {value: .nan}\n"
+    with pytest.raises(PolicyValidationError):
+        Policy.from_yaml(doc)
+
+
 def test_field_config_roundtrip_distinguishes_null_value():
     fixed = MetadataFieldConfig.model_validate({"value": None})
     sourced = MetadataFieldConfig.model_validate({"source": "context.a"})

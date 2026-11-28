@@ -1,8 +1,10 @@
 # Implementation Report — chunkweave 0.1.0（Policy 驱动架构）
 
-All numbers below come from actual runs on 2026-11-26; the HTTP
-service section and its test counts from 2026-11-27 (Python 3.13.16,
-Windows-10-10.0.19045-SP0, Intel64 Family 6 Model 158 Stepping 10).
+Most numbers below come from actual runs on 2026-11-26; the HTTP
+service section and its initial test counts from 2026-11-27. The current
+verification numbers were rerun on 2026-11-28 after strict JSON metadata
+validation (Python 3.13.16, Windows-10-10.0.19045-SP0, Intel64 Family 6
+Model 158 Stepping 10).
 
 ## 1. Directory layout
 
@@ -20,7 +22,7 @@ chunkweave/
 │   ├── organization.py         # Runtime: per-parent descent, ordering
 │   ├── engine.py               # Registry/StrategySpec + ChunkEngine
 │   └── server.py               # optional HTTP service (create_app, POST /api/v1/chunks)
-├── tests/                      # 13 test files, 304 tests
+├── tests/                      # 13 test files, 317 tests
 ├── examples/                   # 11 runnable examples + policies/*.yaml
 ├── benchmarks/                 # bench.py + fingerprint.py + results.json
 ├── docs/                       # design, configuration, metadata, migration,
@@ -69,7 +71,7 @@ copies plus include-gated reserved-key copies. Policy Hash =
 
 | Check | Result |
 | --- | --- |
-| `pytest -q` | **304 passed** in ~1.1 s |
+| `pytest -q` | **317 passed** in ~1.1 s |
 | `ruff check .` | **All checks passed** |
 | `mypy src` | **Success: no issues found in 9 source files** |
 | `examples/*.py` | **11/11 run OK** |

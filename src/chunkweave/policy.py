@@ -11,7 +11,6 @@ the Execution IR live in the compiler layer.
 
 from __future__ import annotations
 
-import json
 import os
 import re
 from pathlib import Path
@@ -30,7 +29,12 @@ from pydantic import (
     model_validator,
 )
 
-from .models import RESERVED_METADATA_KEYS, PolicyLoadError, PolicyValidationError
+from .models import (
+    RESERVED_METADATA_KEYS,
+    PolicyLoadError,
+    PolicyValidationError,
+    json_roundtrip_problem,
+)
 
 API_VERSION = "chunkweave/v1"
 """The only ``api_version`` this engine accepts."""
@@ -105,10 +109,9 @@ class MetadataFieldConfig(BaseModel):
                     f"got {self.source!r}"
                 )
         else:
-            try:
-                json.dumps(self.value)
-            except (TypeError, ValueError) as e:
-                raise ValueError(f"'value' must be JSON-serializable: {e}") from e
+            problem = json_roundtrip_problem(self.value)
+            if problem is not None:
+                raise ValueError(f"'value' must be JSON-serializable: {problem}")
         return self
 
     @property
