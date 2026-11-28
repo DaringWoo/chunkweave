@@ -67,7 +67,7 @@ src = ["src", "tests"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 # CJK punctuation is intentional: these are the default Chinese separators.
-allowed-confusables = ["！", "？", "；", "，", "。"]
+allowed-confusables = ["！", "？", "；", "，", "。", "：", "（", "）"]
 
 [tool.mypy]
 python_version = "3.11"
